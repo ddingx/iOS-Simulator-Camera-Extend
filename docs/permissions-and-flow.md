@@ -385,3 +385,75 @@ make run
 | `cc501de` | 加 [com.apple.security.device.camera + audio-input + disable-library-validation](file:///Users/guoshuyu/workspace/swmansion-copy/project.yml#L66-L74) | ✅ |
 
 **教训**：Hardened Runtime 一旦 ON，所有隐私 API（camera / mic / location / Apple Events / file access）的 entitlement 必须**显式**配齐，否则 macOS 直接静默拒绝且**不进 TCC 流程**——这是最难调试的状态，因为 `tccutil`、`requestAccess`、系统设置都看不出问题。
+
+---
+
+## 6. 现象记录：屏幕录制对话框间歇性弹出（**未根治**）
+
+> 这一节是给后续维护者看的"现场报告"，不是已修问题。
+
+**现象**：SimCamApp 在「系统设置 → 屏幕录制」里开关已 ON，但**偶尔**仍会弹出 macOS 的复授权对话框：
+
+> "SimCamApp" would like to record this computer's screen and audio.
+> Grant access to this application in Privacy & Security settings ...
+> [ Open System Settings ]   [ Deny ]
+
+注意是文案 **"would like to record this computer's screen"** 这一种（macOS 13/14 的 alert 形态），不是 macOS 15 的 *"bypass the private window picker / Allow For One Month"*。
+
+**已查清的事实**：
+
+抓 `tccd` + `replayd` log（`log show --predicate 'process == "tccd" OR process == "replayd"'`）显示，SimCamApp 跑 [ScreenFrameProducer](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/FrameProducers.swift) 时：
+
+```
+14:56:58.858  tccd: Handling access request to kTCCServiceScreenCapture
+              from dev.simcam.app  pid=...
+              ReqResult(Auth Right: Allowed (System Set), promptType: 1, DB Action: None)
+14:56:58.868  replayd: hasScreenCaptureAccess... TCC Allow
+```
+
+- 每秒约 4 次（≈ 250ms 一次），频率正好对应 [ScreenFrameProducer.startFollowTimer](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/FrameProducers.swift#L691-L700) 的 `repeating: .milliseconds(250)`；
+- `Auth Right: Allowed (System Set)` —— 权限是真的有；
+- `DB Action: None` —— TCC 没动数据库；
+- `promptType: 1` —— 但 access 评估带的 promptType 是 1（`kTCCPromptTypeAlert`，会触发模态对话框的那一档）。
+
+**初步结论**（**尚未通过对照实验完全确认**）：
+
+- 这**不是**首次授权框（那种叫 *"Policy disallows prompt"* 或 *"AUTHREQ_PROMPT"*）。
+- 这**不是** macOS 15 Sequoia 的"月度复授权提醒"（那种文案带 *"Allow For One Month"*）。
+- 高频的 `kTCCServiceScreenCapture` access 评估 + `promptType=1` 是嫌疑触发条件 —— 但**单独**重启 SimCamApp 时不一定每次都弹（稳定性低）。
+- 弹与不弹之间的差异变量目前不明（怀疑跟 distance-from-last-Allow / 显示器拓扑变化 / SC 调用参数差异有关）。
+
+**为什么 followTimer 是 250ms**：[ScreenFrameProducer](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/FrameProducers.swift#L702-L753) 在 followSimulator 模式下需要跟随 Simulator 窗口移动 —— 每 250ms 调一次 `SCShareableContent.excludingDesktopWindows(...)` 拿到最新的 `Simulator.app` 窗口矩形，然后 `updateContentFilter` 把 `sourceRect` 锁定上去。这是 SimCam 商业版的招牌效果，**不能简单删掉**。
+
+**目前的应对**：
+
+- 弹框出现时点 *Open System Settings* 或 *Deny* 都可以 —— 现在跑着的 SCStream **不会**断（log 显示 `TCC Allow` 一直在打）；这个对话框是 replayd 的"提醒"，不是"撤销"。
+- 关掉 popover、不选 Simulator passthrough（用 *Display N* / *Demo*）会让 `followTimer` 不启动，TCC 评估频率降到几乎 0，从而（经验上）减少弹出。
+
+**潜在优化方向**（待评估，**不要无许可改动**）：
+
+1. **拉长 followTimer 周期**：250ms → 1000ms 或 2000ms，跟随延迟换 TCC 请求量。
+2. **缓存 + 阈值**：仅当 Simulator 矩形 dx/dy ≥ 16pt 时才调 `updateContentFilter`；窗口列表 / display 列表只在第一次 producer 启动时取，之后用便宜的 `CGWindowListCopyWindowInfo`（不需要屏幕录制权限）。
+3. **不重 stop+start SCStream**：[SimCamEngine.setSource](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/SimCamEngine.swift) 切源时如果新旧都是 `ScreenFrameProducer`，复用现有 stream，只 `updateContentFilter`。
+
+> **注意**：方向 1/2/3 都**会**减少 TCC 请求量，但**并不能保证**根治弹框。要确认根因还需要在弹框出现的瞬间同步抓 `log stream` 现场。在没有可重现 reproducer 之前，不建议盲改 followSimulator 这条核心代码路径。
+
+**抓现场的命令模板**：
+
+```bash
+# 1. 准备：清一下旧 log，开 stream
+log stream \
+  --predicate 'process == "tccd" OR process == "replayd" OR process == "SimCamApp"' \
+  --info --debug --style compact > /tmp/simcam-trace.log &
+
+# 2. 复现：quit + 重启 SimCamApp，等弹框出现
+pkill -x SimCamApp
+sleep 1
+open <path-to-SimCamApp.app>
+
+# 3. 弹框出现的那一刻，立即停 stream（kill %1）
+
+# 4. 找出弹框前 1 秒内 replayd / tccd 在做什么
+grep -nE 'prompt|present|alert|hasScreenCaptureAccess|promptType' /tmp/simcam-trace.log | tail -100
+```
+
