@@ -76,6 +76,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.simcam.app
         MACOSX_DEPLOYMENT_TARGET: "13.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Inherit signing identity / style / team from xcconfig at root.
     dependencies:
       - target: SimCamExtension
@@ -213,6 +214,7 @@ targets:
         IPHONEOS_DEPLOYMENT_TARGET: "16.0"
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_HARDENED_RUNTIME: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # FORCE ad-hoc; matches what a typical simulator app looks like, so
         # SimCamHook.dylib injection is accepted by dyld.
         CODE_SIGN_STYLE: Manual
