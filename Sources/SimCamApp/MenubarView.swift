@@ -1,9 +1,6 @@
 import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
-import os.log
-
-private let uiLog = OSLog(subsystem: "dev.simcam", category: "ui")
 
 struct MenubarView: View {
     @StateObject private var model = MenubarViewModel()
@@ -141,12 +138,10 @@ struct MenubarView: View {
                 model.setSource(.simulatorPassthrough(includeMouse: true), slot: slot)
             }
             // Real cameras —— ForEach 渲染 + Button hit-test。
-            // 加显眼的 NSLog "TAP-FIRED-V2" 字符串，便于实测确认这次 build
-            // 出来的二进制和你正在点的进程是同一个。
+            // 用 \.offset 作为 row identity 让 SwiftUI 在 list 重算时复用 Button，
+            // 否则 NSPopover 嵌套 ScrollView 里 hit-test 会偶发失效。
             ForEach(Array(model.cameras.enumerated()), id: \.offset) { idx, cam in
                 Button(action: {
-                    os_log("TAP-V3 slot=%{public}@ idx=%d name=%{public}@", log: uiLog, type: .default,
-                           slot.label, idx, cam.localizedName)
                     model.setSource(.macCamera(uniqueID: cam.uniqueID,
                                                localizedName: cam.localizedName),
                                     slot: slot)

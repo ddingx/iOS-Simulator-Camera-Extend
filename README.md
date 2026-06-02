@@ -180,6 +180,7 @@ scripts/
   diagnose-sysext.sh            # one-shot sysextd log dump
 docs/
   no-developer-account.md       # the long-form runbook
+  permissions-and-flow.md       # 三类权限 + 端到端流程 + 故障排查（中文）
 RUN_NOTES.md                    # field notes & gotchas
 ```
 
@@ -200,6 +201,7 @@ The full version with reproductions and root-cause analyses lives in [RUN_NOTES.
 ## Documentation
 
 - [README.md](README.md) — what this project is, how to build & run it (you are here).
+- [docs/permissions-and-flow.md](docs/permissions-and-flow.md) — 屏幕录制 / 摄像头 / 系统扩展三类权限的触发点、Hardened Runtime entitlement 矩阵，以及完整的 host → simulator 帧流（中文）。
 - [docs/no-developer-account.md](docs/no-developer-account.md) — long-form runbook: TCC, ad-hoc signing, system-extension activation, and recovery steps.
 - [RUN_NOTES.md](RUN_NOTES.md) — field notes and gotchas accumulated while building this clone (Chinese).
 - [Sources/SimCamHook/SimCamHook.h](Sources/SimCamHook/SimCamHook.h) — wire protocol v2 (48-byte header, `cameraSlot`).

@@ -121,12 +121,9 @@ public final class CameraDeviceFrameProducer: NSObject, FrameProducer, AVCapture
         //   - 若 TCC 表里没有当前进程身份对应的条目 → 弹授权框
         //   - 若已 authorized → 直接 callback(true)
         //   - 若已 denied/restricted → 直接 callback(false)（不会重弹）
-        // 这样我们能区分"真 denied"和"刚 reset 但 status 还报 denied"两种情况。
+        // 注意：必须先在 entitlements 里声明 com.apple.security.device.camera，
+        // 否则 Hardened Runtime 会让 requestAccess 静默返回 NO 且永不弹框。
         let preStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        os_log("camera authorizationStatus(pre) = %d device=%{public}@",
-               log: producerLog, type: .default,
-               preStatus.rawValue, device.localizedName)
-
         let sema = DispatchSemaphore(value: 0)
         var granted = (preStatus == .authorized)
         if preStatus != .authorized {
@@ -135,10 +132,6 @@ public final class CameraDeviceFrameProducer: NSObject, FrameProducer, AVCapture
                 sema.signal()
             }
             _ = sema.wait(timeout: .now() + 30)
-            os_log("camera requestAccess returned granted=%{public}@ post=%d",
-                   log: producerLog, type: .default,
-                   granted ? "YES" : "NO",
-                   AVCaptureDevice.authorizationStatus(for: .video).rawValue)
         }
         guard granted else {
             throw NSError(domain: "SimCam.Camera", code: -1,
