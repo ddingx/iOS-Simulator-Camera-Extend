@@ -1,0 +1,11 @@
+.DS_Store
+DerivedData/
+build/
+
+# xcodegen 产物 —— 重新跑 `xcodegen generate` 即可重生成
+SimCam.xcodeproj/
+Generated/
+
+# Xcode 用户态
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
