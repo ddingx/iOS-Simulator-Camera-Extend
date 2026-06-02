@@ -43,6 +43,15 @@ iOS Simulator 没有相机。一旦你的 app 涉及 `AVCaptureSession`、扫码
 
 ## 架构
 
+<div align="center">
+<img src="docs/assets/architecture.png" alt="Architecture" width="900" />
+</div>
+
+帧线协议（48 字节 v2 头 + `cameraSlot`）见 [SimCamHook.h](Sources/SimCamHook/SimCamHook.h)。
+
+<details>
+<summary>ASCII 版（fallback）</summary>
+
 ```
 ┌────────────────────── macOS host ─────────────────────────┐
 │  SimCamApp.app  (menubar)                                 │
@@ -71,7 +80,41 @@ iOS Simulator 没有相机。一旦你的 app 涉及 `AVCaptureSession`、扫码
 └───────────────────────────────────────────────────────────┘
 ```
 
-帧线协议（48 字节 v2 头 + `cameraSlot`）见 [SimCamHook.h](Sources/SimCamHook/SimCamHook.h)。
+</details>
+
+---
+
+## 开始之前你需要知道
+
+这个项目**不是 App Store 的成品**，而是一个 clean-room 复刻仓库。能不能跑起来取决于你愿意接受哪条路线：
+
+### 路线 A：Simulator 路径（推荐，零门槛）
+
+| 你需要 | 说明 |
+|---|---|
+| 免费 Apple ID | 不用付费 Apple Developer Program |
+| Xcode 15+ | 用免费 Personal Team 给 host app 做 ad-hoc 签名 |
+| `xcodegen`、`make` | `brew install xcodegen` |
+| 第一次同意 *屏幕录制 / 相机* TCC 弹窗 | 系统级，正常用户授权 |
+
+完成上面这些就能跑通：被测 iOS app 在 Simulator 里"看到"Mac 的相机/桌面/视频文件/二维码画面，**完全无需付费 Apple 账号**。
+
+### 路线 B：macOS 虚拟摄像头路径（可选）
+
+只有当你想让 QuickTime / FaceTime / Zoom 这类 macOS app 也能选 *SimCam Virtual Camera* 时才需要。它涉及 CMIO Camera System Extension —— Apple 对系统扩展的部署有严格要求，没有付费账号的话只剩**部分降级 SIP** 一条路：
+
+| 你需要 | 说明 |
+|---|---|
+| 进 Recovery 改 SIP | `csrutil enable --without debug --without kext`（保留绝大部分保护，仅放开 debugger / kext 加载） |
+| `sudo systemextensionsctl developer on` | 允许加载未公证的系统扩展 |
+| 把 `SimCamApp.app` 装到 `/Applications/` | sysextd 拒绝从 DerivedData 加载扩展 |
+
+> 如果你**不愿动 SIP**，又确实需要 macOS 端虚拟摄像头：唯一干净的路是花 **$99/年 Apple Developer Program**，然后用付费证书 + Notarization 让系统扩展正常激活。这个仓库不为你处理签名/公证，直接买 [SimCam](https://simcam.swmansion.com/) 在体验上更优。
+
+### 完全不行的场景
+
+- 想给**真机**虚拟相机：不可能。iOS 真机相机 API 在沙箱外，需要内核级 hook 或越狱，本仓库不涉及。
+- 想发布到 App Store 的 app 用它：本仓库的 dylib 注入只在 *Simulator* 进程内有效，不进 ipa，对 App Store 审核没影响 —— 但它也不是给生产用的"假相机源"。
 
 ---
 
@@ -143,8 +186,18 @@ xcrun simctl install booted /path/to/YourApp.app
 
 ---
 
+## About
+
+iOS Simulator 没有相机这件事，我和大多数 iOS 开发者一样吃过苦头：每次写涉及拍照、扫码、人脸、AR 的功能，都得来回插拔真机，或者写一坨假数据兜底。Software Mansion 的 SimCam 把这个问题解得很优雅 —— 但它要 $99/年开发者账号 + 商业 license，对很多个人开发者、自学者、教学课堂、内部工具团队来说门槛偏高。
+
+这个仓库是**一次纯粹的工程练习**：仅依据 [simcam.swmansion.com](https://simcam.swmansion.com/) 公开记录的架构（menubar host + `DYLD_INSERT_LIBRARIES` swizzle + 可选 CMIO 系统扩展），用 Apple 公开 API（`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`）从零复刻。**没有任何 SimCam 代码被使用、查看或复制。**
+
+目标只有两条：让没有付费 Apple 账号的开发者也能在 Simulator 里调相机功能；把整个实现过程的踩坑（TCC、Hardened Runtime entitlement、CMIO 系统扩展激活流程）原汁原味记录在文档里，方便后人少绕路。
+
+如果你最终的需求是**生产级**、**长期支持**、**已公证**的虚拟相机：请买 SimCam 商业版，原团队做了所有难的设计工作，值得这笔钱。如果你只是想本机调试 / 教学 / 做内部工具，欢迎用、改、fork。
+
+---
+
 ## License
 
-[MIT](LICENSE) — fork 它、扩展它、ship 它。
-
-本项目**不**附属于、也未被 Software Mansion 背书。它仅依据 [simcam.swmansion.com](https://simcam.swmansion.com/) 公开记录的架构、用 Apple 公开 API 重新实现，**没有**使用、查看或复制 SimCam 任何源码。如果你需要一份打磨过、有支持、已公证的产品 —— 请购买 SimCam 商业版，原团队做了所有难的设计工作，他们值得你的钱。
+[MIT](LICENSE) — fork、改、ship。本项目**不**附属于、也未被 Software Mansion 背书。

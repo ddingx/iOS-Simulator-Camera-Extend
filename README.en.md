@@ -43,6 +43,15 @@ The whole thing is built on public Apple APIs (`ScreenCaptureKit` / `AVFoundatio
 
 ## Architecture
 
+<div align="center">
+<img src="docs/assets/architecture.png" alt="Architecture" width="900" />
+</div>
+
+The wire protocol (48-byte v2 header with `cameraSlot`) is in [SimCamHook.h](Sources/SimCamHook/SimCamHook.h).
+
+<details>
+<summary>ASCII fallback</summary>
+
 ```
 ┌────────────────────── macOS host ─────────────────────────┐
 │  SimCamApp.app  (menubar)                                 │
@@ -71,7 +80,41 @@ The whole thing is built on public Apple APIs (`ScreenCaptureKit` / `AVFoundatio
 └───────────────────────────────────────────────────────────┘
 ```
 
-The wire protocol (48-byte v2 header with `cameraSlot`) is in [SimCamHook.h](Sources/SimCamHook/SimCamHook.h).
+</details>
+
+---
+
+## Before you start
+
+This repo is **not a finished product on the App Store**. Whether it works for you depends on which path you accept:
+
+### Path A — Simulator path (recommended, zero barrier)
+
+| You need | Notes |
+|---|---|
+| A free Apple ID | No paid Apple Developer Program required |
+| Xcode 15+ | A Personal Team is enough to ad-hoc sign the host app |
+| `xcodegen`, `make` | `brew install xcodegen` |
+| One-time TCC consent for *Screen Recording* / *Camera* | Standard system-level grant |
+
+That's it — the iOS app under test sees Mac-side cameras, desktop, video files, and QR codes, **with no paid Apple account needed**.
+
+### Path B — macOS virtual-camera path (optional)
+
+Only required if you also want *SimCam Virtual Camera* to show up in QuickTime / FaceTime / Zoom. It involves a CMIO Camera System Extension. Apple imposes strict deployment requirements on system extensions, so without a paid account the only clean route is **partial SIP relaxation**:
+
+| You need | Notes |
+|---|---|
+| Boot to Recovery and adjust SIP | `csrutil enable --without debug --without kext` (preserves the bulk of SIP, only opens debugger / kext loading) |
+| `sudo systemextensionsctl developer on` | Allow loading non-notarized system extensions |
+| Install `SimCamApp.app` to `/Applications/` | sysextd refuses to load extensions from DerivedData |
+
+> If you are **not willing to touch SIP** but still need the macOS virtual camera, the only clean alternative is to spend **$99/year on the Apple Developer Program** for a paid cert + Notarization. This repo does not handle signing/notarization for you — at that point just buy [SimCam](https://simcam.swmansion.com/) and get a better experience.
+
+### What this repo cannot do
+
+- **Real-device** virtual camera: not possible. iOS device camera APIs live outside the sandbox; you'd need kernel-level hooks or a jailbreak. Out of scope here.
+- A camera source for App-Store apps: the dylib is injected only inside the *Simulator* process, never ends up in your `.ipa`, has no impact on App Store review — but it is also not a production "fake camera source".
 
 ---
 
@@ -144,8 +187,18 @@ Step-by-step instructions and recovery commands live in [docs/no-developer-accou
 
 ---
 
+## About
+
+Most iOS engineers know the pain: every time you build a feature touching cameras — capture, QR, face detection, AR — you end up plugging a real device in and out, or sprinkling fake-data stubs through your code. Software Mansion's SimCam fixes this elegantly, but at $99/year for an Apple Developer account plus a paid license, the bar is high for indie developers, students, classrooms, and internal-tooling teams.
+
+This repo is **a pure engineering exercise**: a from-scratch re-implementation guided only by the architecture publicly documented at [simcam.swmansion.com](https://simcam.swmansion.com/) (menubar host + `DYLD_INSERT_LIBRARIES` swizzle + an optional CMIO system extension), built on public Apple APIs (`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`). **No SimCam source code was used, viewed, or copied.**
+
+Two goals: let developers without a paid Apple account exercise camera code paths inside the Simulator; and document every non-obvious gotcha (TCC, Hardened Runtime entitlements, system-extension activation flow) so the next person doesn't have to relearn it.
+
+If you need a **production-grade**, supported, notarized virtual-camera product, please buy SimCam — the original team did the hard design work and deserves your money. If you just want local debugging, teaching, or internal tooling, you're welcome to use, modify, and fork this.
+
+---
+
 ## License
 
-[MIT](LICENSE) — fork, extend, ship.
-
-This project is **not** affiliated with or endorsed by Software Mansion. It re-implements the publicly documented architecture of [simcam.swmansion.com](https://simcam.swmansion.com/) using only public Apple APIs. **No** SimCam source code was used, viewed, or copied. If you need a polished, supported, notarized product, please buy a SimCam license — the original team did the hard design work and deserves your money.
+[MIT](LICENSE) — fork, modify, ship. This project is **not** affiliated with or endorsed by Software Mansion.
