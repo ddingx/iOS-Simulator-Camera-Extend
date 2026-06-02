@@ -69,6 +69,9 @@ targets:
         com.apple.security.app-sandbox: false
         com.apple.security.application-groups:
           - dev.simcam.app
+        com.apple.security.device.camera: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.cs.disable-library-validation: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.simcam.app

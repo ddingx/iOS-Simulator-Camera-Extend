@@ -89,6 +89,9 @@ public final class SimCamEngine {
             os_log("[%{public}@] source -> %{public}@", log: log, slot.label, source.description)
             return .success(state)
         } catch {
+            os_log("[%{public}@] FAIL setSource %{public}@ — %{public}@",
+                   log: log, type: .error,
+                   slot.label, source.description, error.localizedDescription)
             mutate { st in
                 st.set(source: .none, for: slot)
                 st.setStreaming(false, for: slot)

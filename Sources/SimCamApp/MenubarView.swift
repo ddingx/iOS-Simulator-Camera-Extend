@@ -1,6 +1,9 @@
 import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
+import os.log
+
+private let uiLog = OSLog(subsystem: "dev.simcam", category: "ui")
 
 struct MenubarView: View {
     @StateObject private var model = MenubarViewModel()
@@ -129,9 +132,48 @@ struct MenubarView: View {
                       selected: current == .demo) {
                 model.setSource(.demo, slot: slot)
             }
-            // Real cameras
-            ForEach(model.cameras, id: \.uniqueID) { cam in
-                cameraRow(slot: slot, cam: cam, current: current)
+            // Simulator passthrough —— 抠出 booted simulator 窗口背后那块桌面
+            // 当画面，并把 simulator 自己从 SCStream 里 excludingWindows 掉，
+            // 这样不会拍到 simulator 窗口本身（避免递归套娃）。
+            sourceRow(slot: slot, icon: "iphone.gen3",
+                      label: "Simulator passthrough",
+                      selected: { if case .simulatorPassthrough = current { return true } else { return false } }()) {
+                model.setSource(.simulatorPassthrough(includeMouse: true), slot: slot)
+            }
+            // Real cameras —— ForEach 渲染 + Button hit-test。
+            // 加显眼的 NSLog "TAP-FIRED-V2" 字符串，便于实测确认这次 build
+            // 出来的二进制和你正在点的进程是同一个。
+            ForEach(Array(model.cameras.enumerated()), id: \.offset) { idx, cam in
+                Button(action: {
+                    os_log("TAP-V3 slot=%{public}@ idx=%d name=%{public}@", log: uiLog, type: .default,
+                           slot.label, idx, cam.localizedName)
+                    model.setSource(.macCamera(uniqueID: cam.uniqueID,
+                                               localizedName: cam.localizedName),
+                                    slot: slot)
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: icon(for: cam.kind)).frame(width: 16)
+                        Text(cam.localizedName).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                        let badge = cam.kind.displayLabel
+                        if !badge.isEmpty {
+                            Text(badge).font(.system(size: 9, design: .monospaced))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(.secondary.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        if current == .macCamera(uniqueID: cam.uniqueID, localizedName: cam.localizedName) {
+                            Image(systemName: "checkmark").foregroundStyle(.tint)
+                        }
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(current == .macCamera(uniqueID: cam.uniqueID, localizedName: cam.localizedName)
+                                ? Color.accentColor.opacity(0.12) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
             }
             // Screen capture —— 永远显示这个区域，没授权时给用户一个明确的
             // Grant 入口。否则界面会"时有时无"——用户最讨厌的不一致体验。
@@ -374,31 +416,35 @@ struct MenubarView: View {
     private func sourceRow(slot: CameraSlot, icon: String, label: String,
                            badge: String? = nil, selected: Bool,
                            action: @escaping () -> Void) -> some View {
-        // 注意：以前用 Button { } + buttonStyle(.plain) 在 ForEach 里 hit-test
-        // 不稳定（用户表现：None/Demo 这种写死的能点，ForEach 出来的全部点不动）。
-        // 改成普通 HStack + .contentShape + .onTapGesture，这条路径在 SwiftUI
-        // 里非常稳定，不依赖 ButtonStyle。
-        HStack(spacing: 8) {
-            Image(systemName: icon).frame(width: 16)
-            Text(label).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
-            if let badge, !badge.isEmpty {
-                Text(badge).font(.system(size: 9, design: .monospaced))
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(.secondary.opacity(0.15), in: Capsule())
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 4)
-            if selected { Image(systemName: "checkmark").foregroundStyle(.tint) }
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? Color.accentColor.opacity(0.12) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .contentShape(Rectangle())
-        .onTapGesture {
+        // 用原生 Button + .buttonStyle(.borderless) —— 在 NSPopover 容纳的
+        // SwiftUI 内容里，AppKit 的 hit-test 给 Button 走的是 NSControl 路径，
+        // 不会被 ScrollView / VStack 的 hit-shape 屏蔽。
+        // 之前用 .onTapGesture 在 ForEach 里点不到的真因：onTapGesture 是
+        // SwiftUI 自家 GestureRecognizer，layout 一抖就重 attach；Button 内
+        // 部状态由 AppKit 维护，layout 重算不影响 hit-test。
+        Button(action: {
             NSLog("[SimCam.UI] tap row slot=\(slot.label) label=\(label)")
             action()
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: icon).frame(width: 16)
+                Text(label).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                if let badge, !badge.isEmpty {
+                    Text(badge).font(.system(size: 9, design: .monospaced))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(.secondary.opacity(0.15), in: Capsule())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                if selected { Image(systemName: "checkmark").foregroundStyle(.tint) }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Color.accentColor.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.borderless)
     }
 }
 

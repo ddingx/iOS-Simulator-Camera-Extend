@@ -27,14 +27,20 @@ PROJECT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # 找最新一次 build 的 SimCamHook.dylib —— 优先用 Build/Products/ 目录里的
 # universal+codesigned 产物，intermediate 的那份是 *未签名* 的，新版
 # iOS Simulator (>= 17) 会拒绝 dyld 加载。
+# IMPORTANT: 排除 Index.noindex —— 那是 Xcode index server 生成的空壳，
+# 没有真二进制，也没有完整 Info.plist，install/inject 会失败。
 HOOK=$(find ~/Library/Developer/Xcode/DerivedData \
+            -path '*/Index.noindex/*' -prune -o \
             -path '*Build/Products/Debug-iphonesimulator/libSimCamHook.dylib' \
             -print 2>/dev/null \
+       | grep -v Index.noindex \
        | head -1)
 if [[ -z "$HOOK" ]]; then
     HOOK=$(find "$PROJECT_ROOT/build" \
+                -path '*/Index.noindex/*' -prune -o \
                 -path '*Build/Products/Debug-iphonesimulator/libSimCamHook.dylib' \
                 -print 2>/dev/null \
+           | grep -v Index.noindex \
            | head -1)
 fi
 if [[ -z "$HOOK" ]]; then

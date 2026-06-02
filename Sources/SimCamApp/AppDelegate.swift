@@ -1,5 +1,8 @@
 import AppKit
 import SwiftUI
+import os.log
+
+private let appLog = OSLog(subsystem: "dev.simcam", category: "app")
 
 @main
 struct SimCamAppMain {
@@ -17,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 用 os_log 而不是 NSLog —— NSLog 在你机器上被 unified-log 过滤掉。
+        os_log("BUILD-TAG=v3 pid=%d", log: appLog, type: .default,
+               ProcessInfo.processInfo.processIdentifier)
         configureStatusItem()
         configurePopover()
         // 启动后默认进入 demo 源，让用户立即在模拟器看到效果。
