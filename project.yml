@@ -5,8 +5,27 @@
 #   $ open SimCam.xcodeproj
 #   ⌘R 跑 SimCam scheme（构建 App + 嵌入 Camera Extension + CLI）
 #   ⌘U 跑 SimCamTests（unit tests）
+#
+# Code signing
+# ------------
+# Host (SimCamApp) and the system extension (SimCamExtension) are signed with
+# your "Apple Development" identity (free Personal Team is enough). This is
+# REQUIRED for TCC permission grants (Screen Recording / Camera / Microphone)
+# to persist across rebuilds — see Configs/SimCamSigning.xcconfig for the
+# full explanation. To configure your machine, copy
+# Configs/SimCamSigning.local.xcconfig.template -> Configs/SimCamSigning.local.xcconfig
+# and fill in your team id.
+#
+# SimCamHook (iOS dylib) and SimCamDemoApp (iOS demo) stay ad-hoc by design:
+# the iOS Simulator's dyld won't load a dylib signed with an Apple Development
+# cert into an otherwise ad-hoc-signed simulator process.
 
 name: SimCam
+
+configFiles:
+  Debug: Configs/SimCamSigning.xcconfig
+  Release: Configs/SimCamSigning.xcconfig
+
 options:
   bundleIdPrefix: dev.simcam
   deploymentTarget:
@@ -18,13 +37,15 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "-"
-    CODE_SIGNING_REQUIRED: NO
+    # Defaults are inherited from Configs/SimCamSigning.xcconfig. With a fresh
+    # clone they fall back to ad-hoc; with a local override they pick up your
+    # Personal Team. Per-target overrides below force ad-hoc on the iOS dylib
+    # and iOS demo (regardless of any local override).
+    CODE_SIGN_STYLE: $(SIMCAM_CODE_SIGN_STYLE)
+    CODE_SIGN_IDENTITY: $(SIMCAM_CODE_SIGN_IDENTITY)
+    DEVELOPMENT_TEAM: $(SIMCAM_DEVELOPMENT_TEAM)
+    CODE_SIGNING_REQUIRED: YES
     CODE_SIGNING_ALLOWED: YES
-    DEVELOPMENT_TEAM: ""
-    # 走 ad-hoc 签 + `sudo systemextensionsctl developer on` 路线，
-    # 不需要 Apple Developer Program 付费账号。
     ENABLE_HARDENED_RUNTIME: YES
 
 targets:
@@ -52,10 +73,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.simcam.app
         MACOSX_DEPLOYMENT_TARGET: "13.0"
-        # ad-hoc 签名，不需要 team。
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
-        CODE_SIGNING_REQUIRED: NO
+        # Inherit signing identity / style / team from xcconfig at root.
     dependencies:
       - target: SimCamExtension
         embed: true                    # 把 .systemextension 拷进
@@ -112,14 +130,12 @@ targets:
         # gets confused.
         EXECUTABLE_NAME: SimCamExtension
         MACOSX_DEPLOYMENT_TARGET: "13.0"
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
-        CODE_SIGNING_REQUIRED: NO
-        CODE_SIGNING_ALLOWED: YES
         ENABLE_HARDENED_RUNTIME: YES
         # 必要：launchd 才会接受 mach service 注册。
         SWIFT_OBJC_BRIDGING_HEADER: ""
         WRAPPER_EXTENSION: systemextension
+        # Inherit signing identity from xcconfig (must match host's team so
+        # sysextd accepts the embedded extension).
 
   # ── 单元测试（⌘U 跑） ──────────────────────────────────────────────
   SimCamTests:
@@ -140,7 +156,7 @@ targets:
   #    被测 app 进程，dyld 阶段就 swizzle AVFoundation。这就是 SimCam
   #    商业版的真实做法 —— 被测 app 用标准 AVFoundation API，零改动 ──
   SimCamHook:
-    type: ""                  # raw dylib (Mach-O dylib，不是 framework)
+    type: library.dynamic     # raw dylib (Mach-O dylib，不是 framework)
     platform: iOS
     sources:
       - path: Sources/SimCamHook
@@ -163,11 +179,16 @@ targets:
         DYLIB_INSTALL_NAME_BASE: "/usr/local/lib"
         DYLIB_COMPATIBILITY_VERSION: "1"
         DYLIB_CURRENT_VERSION: "1"
+        # FORCE ad-hoc regardless of any local xcconfig override. iOS-Simulator
+        # dyld silently refuses to inject a dylib signed with a Personal Team
+        # cert into an ad-hoc-signed test app, which is what most simulator
+        # apps are.
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGNING_ALLOWED: YES
         DEVELOPMENT_TEAM: ""
+        PROVISIONING_PROFILE_SPECIFIER: ""
         OTHER_LDFLAGS: "-framework AVFoundation -framework CoreMedia -framework CoreVideo -framework CoreImage -framework QuartzCore -framework UIKit -framework Foundation"
 
   # ── iOS demo app：跑在 Simulator 里。它**只用标准 AVFoundation API**，
@@ -189,11 +210,14 @@ targets:
         IPHONEOS_DEPLOYMENT_TARGET: "16.0"
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_HARDENED_RUNTIME: NO
+        # FORCE ad-hoc; matches what a typical simulator app looks like, so
+        # SimCamHook.dylib injection is accepted by dyld.
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGNING_ALLOWED: NO
         DEVELOPMENT_TEAM: ""
+        PROVISIONING_PROFILE_SPECIFIER: ""
 
 schemes:
   SimCam:

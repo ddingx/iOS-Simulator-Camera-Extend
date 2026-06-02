@@ -9,3 +9,7 @@ Generated/
 # Xcode 用户态
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
+
+# Per-machine signing override (your team id stays out of git).
+# See Configs/SimCamSigning.local.xcconfig.template for the structure.
+Configs/SimCamSigning.local.xcconfig

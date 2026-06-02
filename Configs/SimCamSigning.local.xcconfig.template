@@ -1,0 +1,26 @@
+// SimCam — local signing override template.
+//
+// Copy this file to "SimCamSigning.local.xcconfig" (in the same directory),
+// fill in your team id + cert SHA-1, then re-run `xcodegen generate`.
+//
+// The .local.xcconfig file is gitignored. The template (this file) is
+// committed so newcomers know what to do.
+//
+// To find your team id and certificate SHA-1:
+//
+//   $ security find-identity -v -p codesigning
+//   1) <SHA-1>  "Apple Development: <your email> (<TEAM_ID>)"
+//
+// The 40-char hex string before the quoted name is the SHA-1.
+// The 10-char string in parentheses inside the quoted name is the team id.
+//
+// We pin by SHA-1 (not by the display name "Apple Development") because
+// xcodebuild on recent Xcode versions remaps "Apple Development" to
+// "Mac Development" for macOS targets, and Personal Team accounts only have a
+// single universal "Apple Development" cert. Using the SHA-1 sidesteps that
+// mapping and signs the build with your existing identity.
+
+// SIMCAM_DEVELOPMENT_TEAM   = ABCDE12345
+// SIMCAM_CODE_SIGN_IDENTITY = 0123456789ABCDEF0123456789ABCDEF01234567
+// SIMCAM_CODE_SIGN_STYLE    = Manual
+

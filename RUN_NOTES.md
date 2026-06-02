@@ -56,22 +56,44 @@ codesign -dvv Build/Products/Debug-iphonesimulator/libSimCamHook.dylib
 
 ---
 
-## 4. ad-hoc 签名 cdhash 抖动 —— TCC 授权频繁失效
+## 4. ad-hoc 签名导致 TCC 授权反复失效 —— 用 Personal Team 修
 
-**现象**：每次 `xcodebuild` 重新 build 后，原来在系统设置里勾选过的「屏幕录制 → SimCamApp」**实际失效**了。开关界面上仍是 ON，但 `SCShareableContent` 立刻又走回退化路径。
+**现象**：每次重 build 后，「系统设置 → 隐私与安全性 → 屏幕录制 / 摄像头」里 SimCamApp 的勾仍然在，但实际授权早已失效。必须先到设置里**把 app 移除**、再重新打开 app 让它重弹一次对话框，才能恢复。每次 build 都要重来一遍，奇葩到怀疑人生。
 
-**根因**：TCC 数据库的索引是 `(bundle-id, cdhash)`。ad-hoc 签名每次 build 后 cdhash 都会变（哪怕代码没改，时间戳变了），等于一个全新的 app，老的授权失效。
+**根因**：
 
-**修法**：
+TCC 的索引键不是 `(bundle-id, cdhash)`，而是 `(bundle-id, code signing requirement)`。code signing requirement（俗称 csreq）的形态取决于签名方式：
+
+- **ad-hoc**（`codesign -s -`）：没有 anchor cert，requirement 实际上 pin 到了 cdhash。每次 rebuild → cdhash 变 → requirement 不再匹配 → TCC 视为「**陌生 app 套了同一个 bundle id**」，于是新建一条 stale 记录但**不弹窗**（因为旧条目还占着 bundle id），表现为 UI 上是 ON、实际权限被吞。
+- **Apple Development cert**（哪怕是 Personal Team 免费签）：requirement 锚到 `anchor apple generic and certificate leaf[subject.CN] = "Apple Development: <你的 Apple ID>"`，cdhash 变化不影响匹配。TCC 一次授权终身有效（对开发者机器而言）。
+
+Apple DTS Quinn 在 [forums/thread/819406](https://developer.apple.com/forums/thread/819406) 与 [forums/thread/678816](https://developer.apple.com/forums/thread/678816) 直接确认了这点：
+
+> "to work well with TCC you need to sign your code with a stable identity, typically an Apple-issued code signing identity"
+
+**修法**（项目里已经做好了）：
+
+1. **macOS 端**（host + system extension）切到 Personal Team 自动签：
+   - `Configs/SimCamSigning.xcconfig` 提供变量 default = ad-hoc，方便没设置 personal team 的人 fallback。
+   - 复制 [`Configs/SimCamSigning.local.xcconfig.template`](Configs/SimCamSigning.local.xcconfig.template) → `Configs/SimCamSigning.local.xcconfig`，填上自己的 team id（10 位字符串，Xcode → Settings → Accounts → 你的 Apple ID 那行括号里）。这个 local 文件已被 gitignore。
+   - `xcodegen generate`，host 与 extension 自动用 "Apple Development" 签。
+2. **iOS 端**（hook dylib + demo app）显式保留 ad-hoc。原因：iOS Simulator 的 dyld 不会把签了 Apple Development cert 的 dylib 注入到 ad-hoc 签名的被测进程，硬塞 personal team 反而废掉注入路径。`project.yml` 里两个 target 都强制 `CODE_SIGN_IDENTITY: "-"`，覆盖任何 xcconfig override。
+3. **一次性清掉旧 ad-hoc 残留**（很重要，否则旧条目还会卡着）：
+   ```bash
+   make reset-tcc        # 内部跑 scripts/reset-tcc.sh
+   ```
+   脚本对 `dev.simcam.app` / `dev.simcam.app.extension` × `ScreenCapture / Camera / Microphone / SystemPolicyAllFiles / Accessibility` 做 `tccutil reset`，并把可能存在的 `/Applications/SimCamApp.app` 改名挪开（避免 Launch Services 还指着旧 ad-hoc 拷贝）。
+4. 重 build 后启动一次，**只**会再弹一次授权对话框；之后任意次重 build、重启都不再失效。
+
+验证：
 
 ```bash
-# 把残留授权清掉，重新走「弹窗 → 同意」流程
-tccutil reset ScreenCapture dev.simcam.app
-
-# 或者从我们 menubar 的 "Grant Screen Recording" 按钮直接重新申请
+codesign -dvv build/Build/Products/Debug/SimCamApp.app 2>&1 | grep -E 'Authority|TeamIdentifier'
+# 期望：Authority=Apple Development: <你的邮箱> (<你的 team id>)
+#       TeamIdentifier=<你的 team id>
+codesign -dvv build/Build/Products/Debug-iphonesimulator/libSimCamHook.dylib 2>&1 | grep -E 'Signature|TeamIdentifier'
+# 期望：Signature=adhoc, TeamIdentifier=not set
 ```
-
-长期方案是用稳定的 Developer ID 签名（需付费账号），让 cdhash 稳定。
 
 ---
 
