@@ -2,14 +2,16 @@
 DerivedData/
 build/
 
-# xcodegen 产物 —— 重新跑 `xcodegen generate` 即可重生成
-SimCam.xcodeproj/
-Generated/
-
 # Xcode 用户态
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 
-# Per-machine signing override (your team id stays out of git).
-# See Configs/SimCamSigning.local.xcconfig.template for the structure.
+# 本地签名 override（机器相关，不能进仓库）
+# Configs/SimCamSigning.xcconfig 是公共默认值，必须入仓
 Configs/SimCamSigning.local.xcconfig
+
+# bootstrap-cert.sh 生成的中间产物 / 私钥（绝对不能入仓）
+*.p12
+*.key
+*.pem
+.local-signing/

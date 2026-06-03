@@ -84,93 +84,153 @@ iOS Simulator 没有相机。一旦你的 app 涉及 `AVCaptureSession`、扫码
 
 ---
 
-## 开始之前你需要知道
+## 现在能做什么
 
-这个项目**不是 App Store 的成品**，而是一个 clean-room 复刻仓库。能不能跑起来取决于你愿意接受哪条路线：
+两条链路都打通了，可以**同时**用：
 
-### 路线 A：Simulator 路径（推荐，零门槛）
+| 你想要的效果 | 走哪条链路 | 服务对象 |
+|---|---|---|
+| 在 **iOS Simulator 里**跑你的 iOS app，让它的相机预览/扫码/视频通话拿到自定义画面 | **Simulator hook 链路**（DYLD inject） | 任何 simulator 内的 iOS app（你的 demo、你公司业务 app、第三方 app） |
+| 在 **macOS 上**用 QuickTime / FaceTime / Zoom / 飞书 / 腾讯会议 / OBS 录屏，把摄像头切成自定义画面 | **CMIO sysext 链路** | 任何 macOS AVFoundation 客户端 |
 
-| 你需要 | 说明 |
-|---|---|
-| 免费 Apple ID | 不用付费 Apple Developer Program |
-| Xcode 15+ | 用免费 Personal Team 给 host app 做 ad-hoc 签名 |
-| `xcodegen`、`make` | `brew install xcodegen` |
-| 第一次同意 *屏幕录制 / 相机* TCC 弹窗 | 系统级，正常用户授权 |
+**两条链路共享同一个画面源**：你在 SimCam menubar 里把 back/front 切到 *FaceTime HD / Image / Video / QR / Simulator passthrough / 任意窗口或 Display*，QuickTime 看到的画面、simulator 内 iOS app 看到的画面**完全同源、同步切换**。
 
-完成上面这些就能跑通：被测 iOS app 在 Simulator 里"看到"Mac 的相机/桌面/视频文件/二维码画面，**完全无需付费 Apple 账号**。
-
-### 路线 B：macOS 虚拟摄像头路径（可选）
-
-只有当你想让 QuickTime / FaceTime / Zoom 这类 macOS app 也能选 *SimCam Virtual Camera* 时才需要。它涉及 CMIO Camera System Extension —— Apple 对系统扩展的部署有严格要求，没有付费账号的话只剩**部分降级 SIP** 一条路：
-
-| 你需要 | 说明 |
-|---|---|
-| 进 Recovery 改 SIP | `csrutil enable --without debug --without kext`（保留绝大部分保护，仅放开 debugger / kext 加载） |
-| `sudo systemextensionsctl developer on` | 允许加载未公证的系统扩展 |
-| 把 `SimCamApp.app` 装到 `/Applications/` | sysextd 拒绝从 DerivedData 加载扩展 |
-
-> 如果你**不愿动 SIP**，又确实需要 macOS 端虚拟摄像头：唯一干净的路是花 **$99/年 Apple Developer Program**，然后用付费证书 + Notarization 让系统扩展正常激活。这个仓库不为你处理签名/公证，直接买 [SimCam](https://simcam.swmansion.com/) 在体验上更优。
-
-### 完全不行的场景
-
-- 想给**真机**虚拟相机：不可能。iOS 真机相机 API 在沙箱外，需要内核级 hook 或越狱，本仓库不涉及。
-- 想发布到 App Store 的 app 用它：本仓库的 dylib 注入只在 *Simulator* 进程内有效，不进 ipa，对 App Store 审核没影响 —— 但它也不是给生产用的"假相机源"。
+> ⚠️ **iOS Simulator 内 iOS app 不可能直接走 CMIO** —— iOS SDK 里根本没有 CMIO 接口，这是 Apple 平台的硬限制（不是本项目能解决的，SimCam 商业版同样如此）。所以"让 simulator 里 iOS app 看到 SimCam 画面"必须走 hook 链路。这跟 SimCam 官网"without changing anything in your app"承诺并不矛盾——指的是**你 iOS app 代码不改 / 不引 SDK / 不换 bundle id**，并不是不需要在 Mac 一侧做注入步骤。
 
 ---
 
-## 快速开始（Simulator 路径）
+## 环境准备
 
-只需要：免费 Apple ID + Xcode 15+ + `xcodegen`。
+### 必须
+
+| | 说明 |
+|---|---|
+| **macOS** | 13+（开发机用 macOS 14/15/26 都验过） |
+| **Xcode** | 15+，命令行工具齐全（`xcodebuild` / `xcrun simctl` / `codesign` / `security`）|
+| **OpenSSL** | macOS 自带 LibreSSL 的 `security` 工具够用；`bootstrap-cert.sh` 会用 OpenSSL 3.x（Homebrew 装的或 macOS 14+ 自带） |
+| **booted iOS Simulator** | 要测哪台机型自己 boot；一台就够 |
+
+### 仅 CMIO sysext 链路需要
+
+| | 说明 |
+|---|---|
+| **SIP developer mode** | `sudo systemextensionsctl developer on`（重启失效，每次开机要重开一次） |
+| **sudo 权限** | 装 sysext 必须把 host bundle 拷到 `/Applications/` 并 `chown root:wheel`（sysextd 的硬约束） |
+| **本地自签名证书 SimCam Local Dev** | 一次性，`make bootstrap-cert` 生成并导入 keychain；私钥不入仓 |
+
+### **不需要**
+
+- ❌ 付费 Apple Developer Program（$99/年）—— 用本地自签名证书替代
+- ❌ Personal Team —— 已验证 Personal Team 不支持 System Extension capability
+- ❌ 关 SIP / 越狱
+- ❌ 改 iOS app 代码、装 SDK、换 bundle id
+
+---
+
+## Quick start
+
+### 一次性 setup（每台开发机做一次）
 
 ```bash
-# 1. 生成 Xcode 工程
-brew install xcodegen
-make open
+# 1. 生成本地代码签名证书 SimCam Local Dev，导入 login keychain
+make bootstrap-cert
 
-# 2. build host menubar app
-xcodebuild -scheme SimCam -configuration Debug \
-  -derivedDataPath build/SimCamDD build
-
-# 3. build demo + 注入用 dylib（必须 SimCamDemo scheme，SimCam scheme 不带 dylib）
-xcodebuild -project SimCam.xcodeproj -scheme SimCamDemo \
-  -sdk iphonesimulator -arch arm64 -configuration Debug build
-
-# 4. 启动 simulator + 安装 demo
-xcrun simctl boot "iPhone 17 Pro" 2>/dev/null || true
-open -a Simulator
-xcrun simctl install booted \
-  ~/Library/Developer/Xcode/DerivedData/SimCam-*/Build/Products/Debug-iphonesimulator/SimCamDemoApp.app
-
-# 5. 启动 host menubar app
-open build/SimCamDD/Build/Products/Debug/SimCamApp.app
-
-# 6. 把 hook 注入到 demo
-./scripts/inject-simulator.sh dev.simcam.demo
+# 2. 打开 macOS 系统扩展开发者模式（重启失效）
+sudo systemextensionsctl developer on
 ```
 
-跑通的样子：simulator 里的 demo app 出现 *Switch to Front* 按钮，画面是 host 推过来的。默认后置源是 **Simulator passthrough** —— 拖动 Simulator 窗口，相机画面就跟着背后桌面走。
+### 跑通 CMIO 链路（macOS 上的虚拟摄像头）
 
-把它接到**自己的 app**上，把 bundle id 换成自己的即可：
+```bash
+# 3. build + 重签 + 拷到 /Applications/（需要 sudo）
+make install
+
+# 4. 启动 SimCam menubar app
+make run
+
+# 5. 第一次激活：菜单栏点 SimCam 图标 → Activate Virtual Camera
+#    系统会弹一次 "允许 SimCam Local Dev 签发的 system extension"
+#    去 System Settings → Privacy & Security 点 Allow
+#    之后任何 rebuild / 重装都不会再弹（DR 锁证书根，TCC 不失忆）
+
+# 6. 验证
+systemextensionsctl list | grep simcam
+# 应该看到：dev.simcam.app.extension  [activated enabled]
+
+# 然后打开 QuickTime → New Movie Recording → 摄像头下拉选 "SimCam Virtual Camera"
+```
+
+### 跑通 Simulator hook 链路（让 iOS app 看到画面）
+
+```bash
+# 7. 启动一台 simulator + 装 demo app
+open -a Simulator
+xcrun simctl boot "iPhone 17 Pro" 2>/dev/null || true
+
+xcodebuild -project SimCam.xcodeproj -scheme SimCamDemo \
+    -configuration Debug \
+    -destination 'generic/platform=iOS Simulator' build
+
+xcrun simctl install booted \
+    ~/Library/Developer/Xcode/DerivedData/SimCam-*/Build/Products/Debug-iphonesimulator/SimCamDemoApp.app
+
+# 8. 注入 hook 并启动 demo（host SimCamApp 必须在跑）
+./scripts/inject-simulator.sh dev.simcam.demo
+
+# 期望：simulator 里 SimCamDemoApp 的 back / front 摄像头预览
+# 实时显示 SimCam menubar 选中的画面源
+```
+
+把它用在**你自己**的 iOS app 上，bundle id 换掉即可：
 
 ```bash
 xcrun simctl install booted /path/to/YourApp.app
 ./scripts/inject-simulator.sh com.yourcompany.YourApp
 ```
 
-被测 app 不改一行代码，不重新编译，不重新签名。
+**你的 app 一行代码都不用改，不重编、不重签、不换 bundle id。**
 
 ---
 
-## macOS 路径（CMIO 虚拟摄像头，可选）
+## Make targets 一览
 
-如果你还想让 *SimCam Virtual Camera* 出现在 QuickTime / FaceTime / Zoom：
+| target | 作用 |
+|---|---|
+| `make bootstrap-cert` | **一次性**：生成 self-signed `SimCam Local Dev` 证书并导入 login keychain |
+| `make build` | xcodebuild Debug 配置 build host + extension |
+| `make test` | xcodebuild test |
+| `make install` | build + 重签（注入完整 entitlements）+ 拷到 `/Applications/` + `chown root:wheel`（需 sudo）|
+| `make run` | install + `open /Applications/SimCamApp.app` |
+| `make doctor` | 一键诊断：SIP / 开发者模式 / 签名 / sysextd 日志 / extension 状态 |
+| `make reset-tcc` | 切换签名身份后才需要：清掉旧 TCC 记录 |
+| `make open` | 打开 Xcode 工程 |
+| `make clean` | 清掉 `build/` 和 `DerivedData/` |
 
-1. 进 Recovery 跑 `csrutil enable --without debug --without kext`（**部分**降级 SIP，不是全关）。
-2. `sudo systemextensionsctl developer on`。
-3. 把 `SimCamApp.app` 安装到 `/Applications/`（sysextd 不接受 DerivedData 路径）。
-4. 启动它，去 *系统设置 → 隐私与安全性* 点允许。
+签名机制详见 [docs/signing-and-tcc.md](docs/signing-and-tcc.md)。
 
-完整步骤、踩坑恢复见 [docs/no-developer-account.md](docs/no-developer-account.md)。**只用 Simulator 路径可以跳过整段。**
+---
+
+## 完全不行的场景
+
+- **真机**虚拟相机：不可能。iOS 真机相机 API 在沙箱外，需要内核级 hook 或越狱，本仓库不涉及。
+- 想发布到 App Store 的 app 用它：本仓库的 dylib 注入只在 *Simulator* 进程内有效，不进 ipa，对 App Store 审核没影响 —— 但它也不是给生产用的"假相机源"。
+- 不想 inject、想让 simulator 内 iOS app 走 CMIO 那条管子：见上面方框里的解释，物理上不可能。
+
+---
+
+## 故障排查速查
+
+| 现象 | 检查 |
+|---|---|
+| `make install` 报 `'SimCam Local Dev' not found` | 跑 `make bootstrap-cert`；确认 `security find-identity -v -p codesigning` 列表里有 SimCam Local Dev |
+| `systemextensionsctl list` 看不到 extension | 跑 `make doctor`；常见根因：没开 `sudo systemextensionsctl developer on`、host 没在 `/Applications/`、host owner 不是 root:wheel |
+| sysext 状态是 `[activated waiting for user]` | 去 System Settings → Privacy & Security → 最下面点 Allow |
+| QuickTime 摄像头列表里没有 *SimCam Virtual Camera* | sysext 没 activated（看上一行）；或 sysext activated 了但 host 没启动 → `make run` |
+| 注入 simulator 后看不到画面 / `xcrun simctl spawn booted log stream` 没有 `[SimCamHook]` 行 | dylib 路径错（必须是 `Build/Products/Debug-iphonesimulator/libSimCamHook.dylib`，未签名 intermediate 那份会被 dyld 静默拒绝），或 host SimCamApp 没在跑（`/tmp/com.simcam.frames.sock` 不存在）|
+| iOS app 报 `Camera permission denied` | 不是注入的问题，是被测 app 自己 Info.plist 缺 `NSCameraUsageDescription` |
+| 改了 hook 代码、注入没生效 | 必须 build `SimCamDemo` scheme，不是 `SimCam` scheme（hook dylib 只在 SimCamDemo scheme 里 build） |
+
+更长的排查清单见 [docs/permissions-and-flow.md](docs/permissions-and-flow.md) §3 和 [RUN_NOTES.md](RUN_NOTES.md)。
 
 ---
 
@@ -179,8 +239,9 @@ xcrun simctl install booted /path/to/YourApp.app
 | 文档 | 内容 |
 |---|---|
 | [README.en.md](README.en.md) | English version |
-| [docs/permissions-and-flow.md](docs/permissions-and-flow.md) | 屏幕录制 / 摄像头 / 系统扩展三类权限的触发点、Hardened Runtime entitlement 矩阵、host → simulator 完整帧流、故障排查 |
-| [docs/no-developer-account.md](docs/no-developer-account.md) | 长版 runbook：TCC、ad-hoc 签名、系统扩展激活、踩坑恢复 |
+| [docs/signing-and-tcc.md](docs/signing-and-tcc.md) | self-signed `SimCam Local Dev` 证书的设计动机；为什么不用 ad-hoc / Personal Team / Developer Program |
+| [docs/permissions-and-flow.md](docs/permissions-and-flow.md) | 屏幕录制 / 摄像头 / 系统扩展三类权限矩阵、Hardened Runtime entitlement、host → simulator 完整帧流、故障排查 |
+| [docs/no-developer-account.md](docs/no-developer-account.md) | 长版 runbook：双链路端到端步骤、TCC、SIP、`developer on`、踩坑恢复 |
 | [RUN_NOTES.md](RUN_NOTES.md) | 复刻过程踩到的非显然坑 + 根因 |
 | [Sources/SimCamHook/SimCamHook.h](Sources/SimCamHook/SimCamHook.h) | 帧线协议 v2（48 字节头 + `cameraSlot`） |
 

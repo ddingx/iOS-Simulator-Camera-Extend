@@ -7,8 +7,8 @@
 > 2. **iOS Simulator 端**：被测 app 的 **标准 AVFoundation API 零代码改动**，就能拿到 host 推过来的画面 / QR / 视频。这条链路是 SimCam 商业版的主打能力。
 >
 > **结论**：两条链路在免账号状态下**都能跑通**。代价：
-> - 链路 1 需要降级 SIP（仅在开发机上一次）+ ad-hoc 签 + `/Applications/` 安装。
-> - 链路 2 完全不需要降级 SIP、不需要任何系统授权——只要 build 出 dylib 就能注入。
+> - 链路 1（macOS CMIO）：一次性 `make bootstrap-cert` 生成本地 self-signed CA + `sudo systemextensionsctl developer on`（重启失效，每次开机要再开一次）+ host app 必须装在 `/Applications/`（`make install` 会代办）。**不需要降级 SIP。**
+> - 链路 2（iOS Simulator hook）：完全不需要降级 SIP、不需要任何系统授权——只要 build 出 dylib 就能注入。
 >
 > **当前已验证范围（macOS 26.2 Tahoe / Xcode 26.2 / iOS Simulator 26.2）**：
 > - ✅ macOS：System Extension 通过 sysextd 校验、`activated enabled`、被 lazy launch
@@ -302,83 +302,106 @@ open SimCamApp.app                     # host menubar 起 unix sock
 
 如果你只关心 simulator，**这一节可以全部跳过**。链路 1 是给"想让 macOS 上 QuickTime/FaceTime/Zoom 也看到 SimCam 虚拟摄像头"的场景用的，需要 system extension 进系统。
 
+> 也是 [https://simcam.swmansion.com/](https://simcam.swmansion.com/) 商业版「macOS 上 Mac 端任何相机 app 都能选 SimCam Virtual Camera」那条链路的开源复刻。
+
 ### 2.1 苹果给 system extension 设的三条门
 
 | 路径 | 要求 |
 |---|---|
 | 正经发行 | $99 开发者账号 + Notarization + 用户在系统设置里允许 |
 | 团队内测 | $99 + Provisioning Profile 含 `com.apple.developer.system-extension.install` entitlement |
-| 本机调试（本文要解决的） | **ad-hoc 签 + `systemextensionsctl developer on` 绕过 Profile 校验** |
+| 本机调试（本文要解决的） | **self-signed CA `SimCam Local Dev` 签 + `systemextensionsctl developer on`** |
 
-第三条 Apple 没在文档里大书特书，但确实存在。代价是你必须放宽一部分 SIP。
+ad-hoc（`codesign -s -`）和 Apple Development（Personal Team 免费签）都**不能**走第三条：
+
+- **ad-hoc**：能装上 system extension，但 TCC 用 cdhash 锁 designated requirement，每次 rebuild cdhash 一变，Camera / Screen Recording / Microphone 授权全部失效；
+- **Personal Team 免费签**：Apple 不给 Personal Team 颁 System Extension capability，profile 申请直接报 *"Personal development teams ... do not support the System Extension capability"*。
+
+所以本仓库选了第三条：本地 self-signed CA + `systemextensionsctl developer on`。原理 / 取舍 / 替代方案对比见 [docs/signing-and-tcc.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/signing-and-tcc.md)。
 
 ### 2.2 必须的前置环境
 
-#### 2.2.1 关闭 SIP 的"调试和签名校验"两块（其余保留）
+#### 2.2.1 SIP 现状（**不需要降级**）
 
-不需要 `csrutil disable` 裸奔。用：
+self-signed CA + `systemextensionsctl developer on` 路线**不需要**碰 SIP。保持默认即可。
 
 ```bash
-# Recovery 终端：
-csrutil enable --without debug --without kext
+csrutil status
+# 期望：System Integrity Protection status: enabled.
 ```
 
-只关闭：
-- Debugging Restrictions（允许调试别人的进程、加 entitlement 调试）
-- Kext Signing（允许加载未经 Apple 签名的 kext / system extension）
+> 历史版本的笔记曾要求 `csrutil enable --without debug --without kext`，那是基于"用 ad-hoc 签 system extension"的旧路线。现在签名升级到 self-signed CA 后这一步**不需要**做。
 
-保留：FS Protections / Apple Internal / Runtime Protections。
-
-#### 2.2.2 进 Recovery
-
-Apple Silicon：关机 → 长按电源键 → "Loading startup options" → Options → Continue → 顶部菜单 Utilities → Terminal → 执行上面那条 → 重启。
-
-Intel：开机即按住 ⌘R，进入后同样开 Terminal。
-
-#### 2.2.3 启用"system extension developer mode"
+#### 2.2.2 启用 system-extension developer mode
 
 ```bash
 sudo systemextensionsctl developer on
 ```
 
-这是 SimCam 这种**未托管**应用能 `OSSystemExtensionRequest activationRequest` 成功的关键。重启后会失效，每次重启都要再开。
+这是让 SimCam 这种**非 Apple-signed** host 能成功 `OSSystemExtensionRequest activationRequest` 的关键。**重启后会失效**，每次重启都要再开。`make doctor` 会检查这一项。
+
+#### 2.2.3 一次性生成本地 self-signed code-signing 证书
+
+第一次 clone 仓库后**必须**先做这一步，否则 build 会报 *"No identity found"*：
+
+```bash
+make bootstrap-cert
+```
+
+这条命令（[scripts/bootstrap-cert.sh](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/bootstrap-cert.sh)）会：
+
+1. 在你的 `login.keychain-db` 里生成一对 ECC P-256 key；
+2. 自签一张证书，CN = `SimCam Local Dev`，EKU = codeSigning；
+3. 把这张证书标成"始终信任 (codeSigning)"。
+
+私钥**只**留在你机器的 keychain，**不**入仓——所以仓库里没有任何证书材料，每个开发者各签各的。
+
+验证：
+
+```bash
+security find-identity -v -p codesigning | grep "SimCam Local Dev"
+# 期望：1 valid identities found
+```
 
 ### 2.3 安装路径必须是 `/Applications/`
 
-`SimCamApp.app` 必须从 `/Applications/SimCamApp.app` 启动；DerivedData 路径下的 app 跑 `OSSystemExtensionManager` 时会被 sysextd 拒绝（理由：路径不在受信任位置）。
+`SimCamApp.app` 必须从 `/Applications/SimCamApp.app` 启动；DerivedData 路径下的 app 跑 `OSSystemExtensionManager` 时会被 sysextd 拒绝（理由：路径不在受信任位置）。host app 还必须 `chown root:wheel`。
 
-```bash
-# 把 DerivedData 里 build 出来的 host app 复制 / symlink 到 /Applications
-sudo cp -R ~/Library/Developer/Xcode/DerivedData/SimCam-*/Build/Products/Debug/SimCamApp.app /Applications/
-```
-
-每次改 host 代码 / extension 代码后都要重新 cp。
+仓库提供的 [scripts/install-systemext.sh](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/install-systemext.sh) 把这套约束都封装好了：build 完之后**重签**一遍（确保 host + extension + 内部 dylib 全部用 `SimCam Local Dev` 签且 designated requirement 锁到 CN）→ 拷到 `/Applications/` → `chown root:wheel`。直接 `make install` 调它即可。
 
 ### 2.4 端到端步骤
 
 ```bash
-# 1. build host + extension
-xcodebuild -scheme SimCam build
+# 0. 一次性：生成本地证书（仅第一次 clone 后）
+make bootstrap-cert
+sudo systemextensionsctl developer on    # 重启后需要重新执行
 
-# 2. cp 到 /Applications
-sudo rm -rf /Applications/SimCamApp.app
-sudo cp -R ~/Library/Developer/Xcode/DerivedData/SimCam-*/Build/Products/Debug/SimCamApp.app /Applications/
+# 1. build + 重签 + 拷到 /Applications/（需要 sudo 写入）
+make install                              # 等价于 make build + scripts/install-systemext.sh
 
-# 3. 启动 host（menubar app）
-open /Applications/SimCamApp.app
+# 2. 启动 host menubar app
+make run                                  # = make install + open /Applications/SimCamApp.app
+#    或者：open /Applications/SimCamApp.app
 
-# 4. 在 menubar popover 里点 "Activate Extension"
-#    系统会弹"系统设置 → Privacy & Security → 允许 ..." 的提示
-#    在那里点 Allow，extension 进入 [activated enabled]
+# 3. 在 menubar popover 里点 "Activate Extension"
+#    第一次会触发 系统设置 → Privacy & Security → 允许扩展 的对话框
+#    点 Allow，extension 会进入 [activated enabled]
 
-# 5. 验证
+# 4. 验证
 systemextensionsctl list | grep simcam
-# 应该有 enabled active 行
+# 期望：dev.simcam.app.extension  [activated enabled]
 system_profiler SPCameraDataType | grep -i simcam
-# 应该看到 "SimCam Virtual Camera"
+# 期望看到 "SimCam Virtual Camera"
 
-# 6. 在 host 任意相机 app（QuickTime → New Movie Recording → Camera 下拉）
+# 5. 在 host 任意相机 app（QuickTime → New Movie Recording → Camera 下拉）
 #    选 SimCam Virtual Camera，应该看到 host 推送的 demo 帧
+```
+
+诊断脚本：
+
+```bash
+make doctor      # = scripts/diagnose-sysext.sh
+# 一把检查 SIP / sysext developer mode / 证书 / host 安装位置 / sysextd 日志
 ```
 
 ### 2.5 macOS 链路常见坑
@@ -386,8 +409,10 @@ system_profiler SPCameraDataType | grep -i simcam
 | 现象 | 原因 | 修法 |
 |---|---|---|
 | `Activation Request: error 1` (`extensionMissingIdentifier`) | extension bundle 没在 host app 的 `Contents/Library/SystemExtensions/` 下 | 检查 `SimCamCameraExtension.systemextension` 是否被 Xcode 拷进 host app |
-| `error 4` (`forbiddenBySystemPolicy`) | 没开 `systemextensionsctl developer on`，或者 host app 不在 `/Applications/` | 见 §2.2.3 / §2.3 |
-| activate 后系统**没弹**任何允许提示 | sysextd 已经记住该 extension 被拒过一次 | `sudo systemextensionsctl reset` + 重启 + 重新 activate |
+| `error 4` (`forbiddenBySystemPolicy`) | 没开 `systemextensionsctl developer on`，或者 host app 不在 `/Applications/` | 见 §2.2.2 / §2.3，或直接 `make run` |
+| `error 8` (`codeValidationFailed`) | 签名身份不对（多半是没跑 `make bootstrap-cert`，host fallback 到 ad-hoc） | `security find-identity -v -p codesigning \| grep 'SimCam Local Dev'` 应该有；没有就 `make bootstrap-cert`，然后 `make install` 重签 |
+| activate 后系统**没弹**任何允许提示 | sysextd 已经记住该 extension 被拒过一次 | `sudo systemextensionsctl reset` + 重启 + `make run` |
+| 重 build 后 TCC 授权失效（系统设置里 ON 但实际 deny） | 你绕过了 `make install` 直接 `xcodebuild build` 跑了 ad-hoc 拷贝 | `make reset-tcc` + `sudo rm -rf /Applications/SimCamApp.app` + `make run` |
 | `cmiod` 看不到 device | extension 进程没被 launch / `startService` 失败 | `log stream --predicate 'process == "SimCamCameraExtension"'` |
 
 ---

@@ -14,6 +14,9 @@ public final class SimCamEngine {
 
     private let log = OSLog(subsystem: "dev.simcam", category: "engine")
     private let frameSocket = LocalSocketFrameServer()
+    /// host → CMIO Camera Extension 的 Apple 官方推荐通道：sink stream + CMSimpleQueue。
+    /// 见 `CMIOSinkClient.swift` & WWDC22 Session 10022。只 push back 槽位的帧。
+    private let cmioSink = CMIOSinkClient()
     private let stateLock = NSLock()
     private var producers: [CameraSlot: FrameProducer] = [:]
     private var _state = SimCamState()
@@ -23,7 +26,11 @@ public final class SimCamEngine {
 
     private init() {
         _state.license = license.current
+        // LocalSocketFrameServer 只服务 iOS Simulator dylib：
+        //   /tmp/com.simcam.frames.sock
+        // CMIO Camera Extension 走 cmioSink（Apple 官方推荐 sink stream 路径）。
         frameSocket.start()
+        cmioSink.start()
     }
 
     /// host→simulator 的 unix domain socket 路径，用于 menubar 展示。
@@ -79,7 +86,13 @@ public final class SimCamEngine {
         do {
             let p = try makeProducer(for: source, format: state.format)
             try p.start { [weak self, slot] sample in
-                self?.frameSocket.push(sample, slot: slot)
+                guard let self = self else { return }
+                // 1) iOS Simulator dylib 走 unix socket（back/front 都推）
+                self.frameSocket.push(sample, slot: slot)
+                // 2) CMIO Camera Extension 走 sink stream（仅 back 槽推给虚拟相机）
+                if slot == .back {
+                    self.cmioSink.push(sample)
+                }
             }
             producers[slot] = p
             mutate { st in
@@ -221,11 +234,22 @@ public final class SimCamEngine {
         var out: [Diagnostic] = []
         out.append(.init(key: "license", ok: true, detail: license.current.label))
         let installed = SystemExtensionProbe.isSimCamExtensionInstalled()
-        out.append(.init(key: "cmio extension",
+        let cmioLive = cmioSink.isConnected
+        // 拆两条：是否安装 + 是否在推帧。
+        // 顶部 banner 看 "cmio installed"（绿色稳态），副标题看 "cmio streaming"（升级态）。
+        // 这样不会出现"顶部说没装、底部说装了"的精分状态。
+        out.append(.init(key: "cmio installed",
                          ok: installed,
                          detail: installed
-                            ? "Camera Extension activated (host AVCapture sees SimCam Virtual Camera)"
-                            : "Camera Extension not activated (run scripts/install-systemext.sh)"))
+                            ? "Camera Extension activated"
+                            : "Camera Extension not activated (run SimCam from Xcode ⌘R, then approve in System Settings)"))
+        out.append(.init(key: "cmio streaming",
+                         ok: installed && cmioLive,
+                         detail: installed
+                            ? (cmioLive
+                                ? "Pushing frames to a CMIO sink stream"
+                                : "Idle — open QuickTime / FaceTime / iOS Simulator and pick \"SimCam Virtual Camera\"")
+                            : "—"))
         let hooks = connectedHookCount
         out.append(.init(key: "simulator hooks",
                          ok: hooks > 0,

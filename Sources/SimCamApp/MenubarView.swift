@@ -28,16 +28,26 @@ struct MenubarView: View {
 
     @ViewBuilder
     private var statusBanner: some View {
-        let cmioOK = model.diagnostics.first(where: { $0.key == "cmio extension" })?.ok ?? false
+        // 把"装没装"和"在不在推帧"分开看：
+        //   未装         → 橙色，提示去装
+        //   装了 但没人消费 → 绿色（这是正常静默状态，QuickTime/iOS Simulator 还没打开摄像头）
+        //   装了且在推帧   → 绿色 + 副标题升级
+        // 这样跟底部 diagnostic 行不会互相打架。
+        let cmioInstalled = model.diagnostics.first(where: { $0.key == "cmio installed" })?.ok ?? false
+        let cmioStreaming = model.diagnostics.first(where: { $0.key == "cmio streaming" })?.ok ?? false
         let hookOK = model.hookConnections > 0
         VStack(alignment: .leading, spacing: 6) {
-            row(dot: cmioOK ? .green : .orange,
-                title: cmioOK
-                    ? "macOS host: SimCam Virtual Camera ready"
+            row(dot: cmioInstalled ? .green : .orange,
+                title: cmioInstalled
+                    ? (cmioStreaming
+                        ? "macOS host: SimCam Virtual Camera streaming"
+                        : "macOS host: SimCam Virtual Camera ready")
                     : "macOS host: CMIO extension not activated",
-                detail: cmioOK
-                    ? "Any AVFoundation client on this Mac sees the SimCam camera."
-                    : "Run `scripts/install-systemext.sh` then enable in System Settings.")
+                detail: cmioInstalled
+                    ? (cmioStreaming
+                        ? "Pushing frames to any AVFoundation client (QuickTime, FaceTime, iOS Simulator)."
+                        : "Open QuickTime / FaceTime / iOS Simulator and pick \"SimCam Virtual Camera\" to start streaming.")
+                    : "Run SimCam from Xcode ⌘R, then approve the extension in System Settings.")
             row(dot: hookOK ? .green : .gray,
                 title: hookOK
                     ? "iOS Simulator: \(model.hookConnections) app(s) injected"

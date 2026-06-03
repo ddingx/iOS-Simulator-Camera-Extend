@@ -34,8 +34,14 @@ import os.log
 /// 3. 二进制对齐 SimCam 真实做法（DYLD_INSERT 注入 + 共享内存帧）。
 ///
 /// v2 把单路扩成 back/front 双 slot，被测 app 切前/后摄就拿到不同帧。
+///
+/// 注：CMIO Camera Extension 的 host↔extension 通道已迁移到 Apple 官方推荐的
+/// `CMIOExtensionStream(direction: .sink)` + `CMSimpleQueueEnqueue`（见
+/// `CMIOSinkClient.swift`），所以本类只剩 simulator dylib 一条路径。
 public final class LocalSocketFrameServer {
 
+    /// iOS Simulator dylib 走的路径。CoreSimulator 把 host 的 `/tmp` 桥接进
+    /// simulator 进程的 `/tmp`，所以保持绝对路径不变。
     public static let socketPath = "/tmp/com.simcam.frames.sock"
 
     private let log = OSLog(subsystem: "dev.simcam", category: "framesock")
@@ -51,7 +57,7 @@ public final class LocalSocketFrameServer {
     public init() {}
 
     public func start() {
-        queue.async { self.listenLoop() }
+        queue.async { self.listenLoop(path: LocalSocketFrameServer.socketPath) }
     }
 
     public func stop() {
@@ -144,21 +150,24 @@ public final class LocalSocketFrameServer {
 
     // MARK: - private
 
-    private func listenLoop() {
+    private func listenLoop(path: String) {
         // 起 server，listen，一直 accept。
-        unlink(LocalSocketFrameServer.socketPath)
+        unlink(path)
+        // 父目录可能不存在 —— 先建好。
+        let parent = (path as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: parent,
+                                                 withIntermediateDirectories: true,
+                                                 attributes: nil)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         if fd < 0 {
-            os_log("socket() failed: %{public}d", log: log, errno); return
+            os_log("socket(%{public}s) failed: %{public}d", log: log, path, errno); return
         }
         // 不要 SIGPIPE
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        let path = LocalSocketFrameServer.socketPath
-        // Avoid overlapping exclusive access to addr.sun_path: capture its
-        // size into a local before forming the inout pointer for strlcpy().
+        // sun_path 在 macOS 上 104 字节上限。
         let sunPathSize = MemoryLayout.size(ofValue: addr.sun_path)
         _ = withUnsafeMutablePointer(to: &addr.sun_path.0) { dst in
             path.withCString { src in
@@ -171,14 +180,15 @@ public final class LocalSocketFrameServer {
             }
         }
         if bindRes != 0 {
-            os_log("bind() failed: %{public}d (path=%{public}s)", log: log, errno, path)
+            os_log("bind(%{public}s) failed: %{public}d", log: log, path, errno)
             Darwin.close(fd); return
         }
-        // 让 simulator 进程能读写：unix sock 受 fs perms 控制
+        // unix sock 受 fs perms 控制；/tmp 路径需要 0666 让 simulator 进程
+        // (uid=guoshuyu) 也能 connect。
         chmod(path, 0o666)
 
         if listen(fd, 8) != 0 {
-            os_log("listen() failed: %{public}d", log: log, errno)
+            os_log("listen(%{public}s) failed: %{public}d", log: log, path, errno)
             Darwin.close(fd); return
         }
         serverFD = fd
@@ -189,14 +199,16 @@ public final class LocalSocketFrameServer {
             let client = accept(fd, nil, nil)
             if client < 0 {
                 if errno == EINTR { continue }
-                os_log("accept() failed: %{public}d", log: log, errno); break
+                os_log("accept(%{public}s) failed: %{public}d", log: log, path, errno); break
             }
             setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
             // 大帧需要 send buffer 够大
             var sndbuf: Int32 = 8 * 1024 * 1024
             setsockopt(client, SOL_SOCKET, SO_SNDBUF, &sndbuf, socklen_t(MemoryLayout<Int32>.size))
-            clientsLock.lock(); clientFDs.append(client); clientsLock.unlock()
-            os_log("simulator hook connected fd=%{public}d (now=%{public}d)",
+            clientsLock.lock()
+            clientFDs.append(client)
+            clientsLock.unlock()
+            os_log("client connected fd=%{public}d (total=%{public}d)",
                    log: log, client, clientCount)
         }
     }

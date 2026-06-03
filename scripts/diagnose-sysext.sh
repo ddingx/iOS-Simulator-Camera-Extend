@@ -9,7 +9,7 @@ echo "==========================================="
 echo
 
 APP="/Applications/SimCamApp.app"
-EXT="$APP/Contents/Library/SystemExtensions/SimCamExtension.systemextension"
+EXT="$APP/Contents/Library/SystemExtensions/dev.simcam.app.extension.systemextension"
 
 echo "── 1. SIP status ────────────────────────────"
 csrutil status 2>&1 | sed 's/^/   /'
@@ -38,11 +38,13 @@ echo
 
 echo "── 5. Code signing ──────────────────────────"
 echo "   APP ↓"
-codesign -dv "$APP" 2>&1 | grep -E "Identifier|Signature|TeamIdentifier|Format" | sed 's/^/      /'
+codesign -dvv "$APP" 2>&1 | grep -E "Identifier|Authority|Signature|TeamIdentifier|Format|CDHash" | sed 's/^/      /'
 echo "   APP entitlements ↓"
 codesign -d --entitlements - "$APP" 2>&1 | grep -E "system-extension|sandbox|Key" | sed 's/^/      /'
+echo "   APP designated requirement ↓"
+codesign -d -r- "$APP" 2>&1 | grep -E "designated" | sed 's/^/      /'
 echo "   EXT ↓"
-codesign -dv "$EXT" 2>&1 | grep -E "Identifier|Signature|TeamIdentifier|Format" | sed 's/^/      /'
+codesign -dvv "$EXT" 2>&1 | grep -E "Identifier|Authority|Signature|TeamIdentifier|Format|CDHash" | sed 's/^/      /'
 echo "   --verify --deep --strict:"
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -5 | sed 's/^/      /'
 echo

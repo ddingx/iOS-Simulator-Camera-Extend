@@ -88,18 +88,21 @@
 
 **关键 entitlement**（这是踩过最大的坑）：
 
-[project.yml](file:///Users/guoshuyu/workspace/swmansion-copy/project.yml#L66-L74) 必须包含：
+[Sources/SimCamApp/Resources/SimCamApp.entitlements](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/Resources/SimCamApp.entitlements) 必须包含：
 
-```yaml
-entitlements:
-  path: Generated/SimCamApp.entitlements
-  properties:
-    com.apple.security.app-sandbox: false
-    com.apple.security.application-groups:
-      - dev.simcam.app
-    com.apple.security.device.camera: true        # ← 必需
-    com.apple.security.device.audio-input: true   # 后续 mic passthrough
-    com.apple.security.cs.disable-library-validation: true
+```xml
+<key>com.apple.security.app-sandbox</key>
+<false/>
+<key>com.apple.security.application-groups</key>
+<array>
+    <string>dev.simcam.app</string>
+</array>
+<key>com.apple.security.device.camera</key>
+<true/>          <!-- 必需 -->
+<key>com.apple.security.device.audio-input</key>
+<true/>          <!-- 后续 mic passthrough -->
+<key>com.apple.security.cs.disable-library-validation</key>
+<true/>
 ```
 
 为什么必需：SimCamApp 是 **Hardened Runtime ON** 的（codesign flag `0x10000(runtime)`，由 Personal Team / DEVELOPMENT cert 签出来都会自动启用）。Hardened Runtime 强制要求**任何使用 camera / mic / location 等隐私 API 的进程**必须在 entitlement 里**显式声明**。少一行 `com.apple.security.device.camera`，则：
@@ -117,7 +120,7 @@ entitlements:
 
 | log 里出现 | 含义 | 修法 |
 |---|---|---|
-| `FAIL setSource camera://... — Camera permission denied. Enable in System Settings ...` | 用户在弹框里拒绝了，或者 entitlement 缺失静默拒绝 | 先确认 [project.yml](file:///Users/guoshuyu/workspace/swmansion-copy/project.yml#L66-L74) 有 `device.camera`；再 `tccutil reset Camera dev.simcam.app` + 重启 app |
+| `FAIL setSource camera://... — Camera permission denied. Enable in System Settings ...` | 用户在弹框里拒绝了，或者 entitlement 缺失静默拒绝 | 先确认 [SimCamApp.entitlements](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/Resources/SimCamApp.entitlements) 有 `device.camera`；再 `tccutil reset Camera dev.simcam.app` + 重启 app |
 | menubar 点击 mac camera 后立刻跳回 None | 同上 |  |
 
 ### 1.3 系统扩展 (System Extension / CMIO)
@@ -134,16 +137,20 @@ entitlements:
 
 **前置硬件 / 系统条件**：
 
-- **必须用真实 Apple Developer Team ID 签名**（即使是免费 Personal Team 也行）。ad-hoc 签名 (`-` identity) 系统**直接拒绝**，错误为 `OSSystemExtensionErrorDomain.codeValidationFailed`。
 - macOS 13+。
+- **签名身份**：本仓库的 host + extension 用本地 self-signed CA `SimCam Local Dev` 签名（`make bootstrap-cert` 一次性生成，私钥留在 keychain 不入仓）。配合 `sudo systemextensionsctl developer on`，sysextd 会接受这套签名并完成激活。原理 / 取舍 / 替代方案对比见 [docs/signing-and-tcc.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/signing-and-tcc.md)。
+- 其它**不能用**的签名：
+  - 纯 ad-hoc (`codesign -s -`)：能装上 sysext，但 TCC 用 cdhash 锁 designated requirement，每次 rebuild cdhash 一变，Camera / Screen Recording / Microphone 授权全部失效；
+  - Apple Development（Personal Team 免费签）：Apple 不给 Personal Team 颁 System Extension capability，profile 申请直接报 *"Personal development teams ... do not support the System Extension capability"*；
+  - Apple Developer Program ($99/年)：技术上最优，但开源项目无法把团队私钥入仓共享，已经放弃。
 
-**Apple 的"developer mode"开关**（仅当你想用 ad-hoc 签名跑系统扩展，**正常路径不需要**）：
+**Apple 的 system-extension developer mode 开关**（**必须开**，每次重启失效）：
 
 ```sh
 sudo systemextensionsctl developer on
 ```
 
-详见 [scripts/install-systemext.sh](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/install-systemext.sh) 与 [scripts/diagnose-sysext.sh](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/diagnose-sysext.sh)。
+详见 [Sources/SimCamApp/ExtensionActivator.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/ExtensionActivator.swift) —— host 端用 `OSSystemExtensionRequest` 走 Apple 官方激活路径；命令行入口是 `make install` + `make run`（自动 build → 重签 → 拷到 `/Applications/` → `chown root:wheel` → open）。
 
 **验证**：
 
@@ -329,7 +336,7 @@ systemextensionsctl list | grep simcam
 - 没有任何条目 → [ExtensionActivator.activate](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/ExtensionActivator.swift) 没跑通，看 `subsystem=dev.simcam.app, category=extension-activator` 日志；
 - `[activated waiting for user]` → 你没去 *系统设置 ▸ 安全性* 点允许；
 - `[terminated waiting for user]` → 同上，但你之前点过否决；用 `systemextensionsctl reset` 然后再启动 host；
-- `OSSystemExtensionErrorDomain code 8 (codeValidationFailed)` → 签名问题，签名身份必须是真实 Team ID，**不能是 ad-hoc**。
+- `OSSystemExtensionErrorDomain code 8 (codeValidationFailed)` → 签名问题。本仓库要求 host + extension 必须用 `SimCam Local Dev` 签（见 [§1.3](#13-系统扩展-system-extension--cmio)）。常见原因：忘了 `make bootstrap-cert` 导致 fallback 到 ad-hoc / 没开 `systemextensionsctl developer on` / host app 不在 `/Applications/`。修：`make bootstrap-cert && sudo systemextensionsctl developer on && make install && make run`。
 
 #### 「demo 启动了但摄像头画面全是占位帧」
 
@@ -341,7 +348,7 @@ systemextensionsctl list | grep simcam
 
 #### 「menubar 点击不响应」
 
-确认进程是 [project.yml](file:///Users/guoshuyu/workspace/swmansion-copy/project.yml) 里的 `dev.simcam.app`：
+确认进程是工程里 `SimCamApp` target 的 bundle id `dev.simcam.app`：
 
 ```sh
 pgrep -lf SimCamApp
@@ -360,15 +367,18 @@ pgrep -lf SimCamApp
 pkill -9 -x SimCamApp 2>/dev/null
 xcrun simctl terminate booted dev.simcam.demo 2>/dev/null
 
-# 2. 清 TCC（屏幕录制 + 摄像头）
-tccutil reset Camera dev.simcam.app
-tccutil reset ScreenCapture dev.simcam.app
+# 2. 清 TCC（封装在脚本里，覆盖 Camera/Mic/ScreenCapture/SystemPolicyAllFiles 等）
+make reset-tcc
 
-# 3. 卸 sysext（注意：需要 SIP off 或 dev mode on 才能真删）
-systemextensionsctl uninstall <TeamID> dev.simcam.app.extension
+# 3. 卸 sysext
+#    第一个参数是当前签名身份的 team identifier
+#    self-signed CA `SimCam Local Dev` 没有 team id，sysextd 显示为 "(null)"
+#    用 `systemextensionsctl list` 查看实际的标识符再传入
+systemextensionsctl uninstall '(null)' dev.simcam.app.extension 2>/dev/null || true
+sudo rm -rf /Applications/SimCamApp.app
 
-# 4. 重新 build + 跑
-make run
+# 4. 重新 build + 重签 + 拷 + 跑
+make run                          # = make install + open /Applications/SimCamApp.app
 ./scripts/inject-simulator.sh dev.simcam.demo
 ```
 
@@ -378,13 +388,17 @@ make run
 
 历史 commit 关系：
 
-| commit | 内容 | mac camera 是否能用 |
-|---|---|---|
-| `e03403d` | 初始 commit。ad-hoc 签名 + 没开 Hardened Runtime | ✅ |
-| `3bd7833` | 切到 Personal Team 签名 → 开了 Hardened Runtime；为持久化 TCC csreq | ❌（entitlement 漏配，silent denied） |
-| `cc501de` | 加 [com.apple.security.device.camera + audio-input + disable-library-validation](file:///Users/guoshuyu/workspace/swmansion-copy/project.yml#L66-L74) | ✅ |
+| commit | 内容 | mac camera 是否能用 | sysext 是否能装 | TCC 是否稳定 |
+|---|---|---|---|---|
+| `e03403d` | 初始 commit。ad-hoc 签 + 没开 Hardened Runtime | ✅ | ✅ | ❌ rebuild 失忆 |
+| `3bd7833` | 切到 Personal Team 签名 → 开了 Hardened Runtime | ❌ entitlement 漏配 silent denied | ❌ Personal Team 不支持 System Extension capability | n/a |
+| `cc501de` | 加 [com.apple.security.device.camera + audio-input + disable-library-validation](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/Resources/SimCamApp.entitlements) | ✅ | ❌ 仍然受 Personal Team 限制 | n/a |
+| 当前 | 切到本地 self-signed CA `SimCam Local Dev` + `make bootstrap-cert` / `make install` / `make run` | ✅ | ✅ 走 `systemextensionsctl developer on` 接受任意签 | ✅ DR 锁 CN，cdhash 怎么变都不影响 |
 
-**教训**：Hardened Runtime 一旦 ON，所有隐私 API（camera / mic / location / Apple Events / file access）的 entitlement 必须**显式**配齐，否则 macOS 直接静默拒绝且**不进 TCC 流程**——这是最难调试的状态，因为 `tccutil`、`requestAccess`、系统设置都看不出问题。
+**两条教训**：
+
+1. **Hardened Runtime 一旦 ON**，所有隐私 API（camera / mic / location / Apple Events / file access）的 entitlement 必须**显式**配齐，否则 macOS 直接静默拒绝且**不进 TCC 流程**——这是最难调试的状态，因为 `tccutil`、`requestAccess`、系统设置都看不出问题。
+2. **Personal Team 是死路**。文档里很多 "免费 Personal Team 自动签" 的建议都不适用 System Extension。真要白嫖，唯一可行路径就是本地 self-signed CA + `systemextensionsctl developer on`（详见 [docs/signing-and-tcc.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/signing-and-tcc.md)）。
 
 ---
 

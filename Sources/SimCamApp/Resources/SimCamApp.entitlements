@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  NOTE: This is the *build-time* entitlements file used by xcodebuild.
+	  It must NOT contain `com.apple.developer.system-extension.install`,
+	  because Xcode treats every com.apple.developer.* entitlement as
+	  restricted and demands a provisioning profile carrying that
+	  capability — and Apple does not issue such a profile to Personal
+	  Teams (and we don't have a paid Developer Program).
+
+	  The system-extension.install entitlement IS required at *install*
+	  time, but we inject it during re-signing in
+	  scripts/install-systemext.sh, after xcodebuild is done.
+	  See docs/signing-and-tcc.md for the full rationale.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>dev.simcam.app</string>
+	</array>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
+</dict>
+</plist>
+

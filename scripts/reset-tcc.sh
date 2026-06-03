@@ -1,29 +1,26 @@
 #!/bin/zsh
-# reset-tcc.sh — wipe stale TCC entries that were keyed off old ad-hoc cdhashes.
+# reset-tcc.sh — wipe stale TCC entries that were keyed off old (ad-hoc or
+# Apple-Development) cdhashes / authorities, so the first launch under the
+# new "SimCam Local Dev" self-signed identity records a fresh grant.
 #
 # Why
 # ---
-# Until commit "switch host+extension to Personal Team signing" SimCamApp and
-# its embedded SimCamExtension were signed ad-hoc. Every rebuild produced a
-# new cdhash, and TCC indexes its grants by (bundle id, code requirement).
-# With ad-hoc, the requirement effectively pins the cdhash, so each rebuild
-# looked like a brand-new app to TCC and the user had to keep removing the app
-# from System Settings -> Privacy & Security -> Screen Recording (and re-grant)
-# on every rebuild.
+# TCC indexes its grants by (bundle id, designated requirement). The
+# designated requirement embeds the signing authority and, for ad-hoc
+# signatures, the exact cdhash. Whenever you switch signing identities or
+# (with ad-hoc) rebuild, the requirement no longer matches the stored grant
+# and macOS demands re-authorization.
 #
-# This script does the cleanup macOS expects when the signing identity
-# changes:
-#   1. tccutil reset for the relevant services and bundle ids, so the next
-#      launch creates a fresh, Personal-Team-keyed entry.
-#   2. kill any running SimCamApp / SimCamExtension so launchd reloads.
-#   3. (best effort) move /Applications/SimCamApp.app aside if you ever ran
-#      `cp` it there — old copies signed ad-hoc would otherwise re-poison the
-#      database.
+# Switching to a *stable* self-signed CA (CN=SimCam Local Dev, see
+# scripts/bootstrap-cert.sh) keeps the requirement constant across rebuilds,
+# but the very first transition still leaves stale rows behind. This script
+# resets them once.
 #
 # References
 #   - Apple DTS Quinn on TCC + ad-hoc signing:
 #     https://developer.apple.com/forums/thread/819406
 #     https://developer.apple.com/forums/thread/678816
+#     https://developer.apple.com/forums/thread/823200
 #   - tccutil(1)
 
 set -euo pipefail

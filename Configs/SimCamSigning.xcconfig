@@ -1,48 +1,27 @@
-// SimCam — signing configuration for the host menubar app + system extension.
+// Configs/SimCamSigning.xcconfig — sole source of truth for SimCamApp /
+// SimCamExtension code-signing configuration.
 //
-// Why this file exists
-// --------------------
-// macOS TCC (Privacy & Security) ties permission grants to the app's code
-// signing **designated requirement** (anchor cert + bundle id), not to the
-// cdhash. With pure ad-hoc signing (`codesign -s -`) every rebuild produces
-// a new cdhash AND there is no anchor certificate, so TCC treats every build
-// as a brand new app and the user has to re-grant Screen Recording / Camera /
-// Microphone every single time.
+// Why these values
+// ----------------
+//   * Apple Development / Personal Team can't be used: Apple refuses to
+//     issue a Mac App Development provisioning profile with the System
+//     Extension capability for Personal Teams (see docs/signing-and-tcc.md).
+//   * Pure ad-hoc (`-`) breaks TCC across rebuilds (DR pins cdhash, every
+//     rebuild => re-prompt for Camera/ScreenCapture).
+//   * Self-signed CA gives a stable DR keyed off the certificate CN, so
+//     TCC keeps its grants across rebuilds. Each developer generates the
+//     cert locally with `make bootstrap-cert`; the private key never
+//     enters the repo.
 //
-// Apple DTS confirms this on:
-//   https://developer.apple.com/forums/thread/819406
-//   https://developer.apple.com/forums/thread/678816
-// Quinn's verdict: "to work well with TCC you need to sign your code with a
-// stable identity, typically an Apple-issued code signing identity".
-//
-// Free Apple IDs already provide one: the "Apple Development" certificate that
-// Xcode auto-creates when you add an Apple ID under Settings -> Accounts and
-// pick the "Personal Team" -> "Sign to Run Locally" option. That is enough to
-// make TCC grants persist across rebuilds.
-//
-// How this file works
-// -------------------
-// project.yml references SIMCAM_DEVELOPMENT_TEAM and SIMCAM_CODE_SIGN_IDENTITY.
-// They default below to ad-hoc (so unconfigured forks still build), and you
-// override them in Configs/SimCamSigning.local.xcconfig (gitignored) with your
-// own personal team id. SimCamHook (iOS dylib) and SimCamDemoApp (iOS demo)
-// stay ad-hoc unconditionally — the iOS Simulator's dyld will not load a
-// dylib signed with an "Apple Development" cert into an ad-hoc-signed host
-// process, so any team config there breaks injection.
-//
-// To configure your machine:
-//   1. cp Configs/SimCamSigning.local.xcconfig.template Configs/SimCamSigning.local.xcconfig
-//   2. edit and put in your team id (Xcode -> Settings -> Accounts -> your
-//      Apple ID -> Manage Certificates -> the 10-char team id in parens).
-//   3. xcodegen generate && open SimCam.xcodeproj  (Xcode will pick up the
-//      identity automatically).
-// -----------------------------------------------------------------------------
+// If you want to switch to a real Apple Developer Program identity, copy
+// this file to Configs/SimCamSigning.local.xcconfig and override the
+// variables there — that filename is gitignored.
 
-// Default to ad-hoc so a fresh clone without any local config still builds.
-SIMCAM_CODE_SIGN_IDENTITY = -
-SIMCAM_CODE_SIGN_STYLE = Manual
-SIMCAM_DEVELOPMENT_TEAM =
+SIMCAM_CODE_SIGN_STYLE       = Manual
+SIMCAM_CODE_SIGN_IDENTITY    = SimCam Local Dev
+SIMCAM_DEVELOPMENT_TEAM      =
+SIMCAM_CODE_SIGNING_REQUIRED = YES
+SIMCAM_CODE_SIGNING_ALLOWED  = YES
 
-// Pull in the user's local override if it exists. xcconfig #include with a
-// leading "?" makes the include optional, so missing files are not an error.
+// Allow a private, gitignored override at Configs/SimCamSigning.local.xcconfig
 #include? "SimCamSigning.local.xcconfig"
