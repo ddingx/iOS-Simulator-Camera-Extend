@@ -1,7 +1,6 @@
 # SimCam CMIO 实现踩坑历史（事后复盘）
 
-> 本文档与 [docs/HANDOFF-2026-06-03.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/HANDOFF-2026-06-03.md) 配套。
-> Handoff 文档是"现场快照 + 最终修复"，本文档是**长期踩坑教训**——尤其是 _主 agent 反复猜错_ 的几次反转、当时拿到了什么证据没用上、之后该怎么避免。
+> 本文档把 CMIO 链路调通过程中的现场快照、最终修复和长期教训合并到一处——尤其是*主 agent 反复猜错*的几次反转、当时拿到了什么证据没用上、之后该怎么避免。
 >
 > 写这份文档的目的：避免后续 reviewer / 我自己重蹈覆辙——不要再删 entitlements、不要再猜 mach service name、不要再回到 IOSurface / framesock。
 
@@ -22,19 +21,19 @@ host 端 [CMIOSinkClient.findSinkStream()](file:///Users/guoshuyu/workspace/swma
 
 ## 1. 反转表（按时间顺序）
 
-> ✅ = 留下了正面贡献的修改；❌ = 撤回 / 没有证据；🤷 = 部分对部分错
+> 结论列含义：**保留** = 留下了正面贡献的修改；**撤回** = 没有证据 / 已回滚；**半对** = 部分对部分错。
 
 | # | 假设 | 结论 | 撤回 / 保留理由 |
 |---|---|---|---|
-| 1 | "macOS 26 cmiod 故意不让自家 host 看自家 sysext"（"loopback shielding"） | ❌ | 一段无 entitlement 的独立 swift 脚本在同机器同时段 enumerate 看到 SimCam Virtual Camera，反证之 |
-| 2 | "sysext Info.plist `CMIOExtensionMachServiceName` 缺 TeamID 前缀是根因" | ❌ | 当时 QuickTime 已能选到 device 看到扫描线，证明 sysext 已经被 cmiod 接受；删 TeamID 前缀也没影响这条路径 |
-| 3 | "sysext 端要先 `addStream` 再 `provider.addDevice`，否则 cmiod 把 device 视作零流" | ✅ | 改完跟 ldenoue/fuziki 对齐，没有打破任何东西，保留 |
-| 4 | "`legacyDeviceID` 必须填 `deviceID.uuidString` 而不是 `nil`" | ✅ | 跟参考项目一致，保留 |
-| 5 | "`var stream = nil` + `super.init()` 之后再 `self.stream = CMIOExtensionStream(..., source: self)` 比 placeholder shim 干净" | ✅ | 跟参考项目一致，保留 |
-| 6 | "`com.apple.security.application-groups` 让 cmiod 把 host 当 sysext 自家父 app 做'回环屏蔽'，必须删掉" | ❌（**直接造成 `extension category returned error` / 起不来**） | 删除后 sysextd 立刻拒绝激活；恢复后 `OSSystemExtensionRequest` 变正常的 _await user approval_ → _activated_。已强制回滚并在 [SimCamApp.entitlements](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/Resources/SimCamApp.entitlements) 注释里禁止后人再删 |
-| 7 | "25 个僵尸 `[terminated waiting to uninstall on reboot]` 阻塞激活，必须重启" | ❌ | 没有任何 sysextd reject log 支持；同时拿 ldenoue 项目对照，僵尸只是视觉上难看，实际不阻塞激活。已撤回 [scripts/install-systemext.sh L50-L62](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/install-systemext.sh#L50-L62) 阈值 `exit 1` |
-| 8 | "`kCMIOStreamPropertyDirection == 1` 一定就是 sink stream" | ❌（**真正的 root cause**） | host 第一帧 `CMSimpleQueueEnqueue` 返回 `-12773 / QueueIsFull`，sysext 端没有任何 sink `startStream()` 触发；说明根本没在向真正的 `SimCam.Sink` 塞帧。Codex 改成按 stream **name** 优先匹配。修复后 QuickTime 实时画面正常 |
-| 9 | "QuickTime 看到扫描线 = source stream 没发布" | ❌ | 扫描线恰好是 [SimCamCMIOStreamSource.tickDemo()](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamExtension/SimCamCMIODevice.swift) 的 demo fallback。出现扫描线证明 **source stream 已经在跑**，问题在 sink 链路 |
+| 1 | "macOS 26 cmiod 故意不让自家 host 看自家 sysext"（"loopback shielding"） | 撤回 | 一段无 entitlement 的独立 swift 脚本在同机器同时段 enumerate 看到 SimCam Virtual Camera，反证之 |
+| 2 | "sysext Info.plist `CMIOExtensionMachServiceName` 缺 TeamID 前缀是根因" | 撤回 | 当时 QuickTime 已能选到 device 看到扫描线，证明 sysext 已经被 cmiod 接受；删 TeamID 前缀也没影响这条路径 |
+| 3 | "sysext 端要先 `addStream` 再 `provider.addDevice`，否则 cmiod 把 device 视作零流" | 保留 | 改完跟 ldenoue/fuziki 对齐，没有打破任何东西，保留 |
+| 4 | "`legacyDeviceID` 必须填 `deviceID.uuidString` 而不是 `nil`" | 保留 | 跟参考项目一致，保留 |
+| 5 | "`var stream = nil` + `super.init()` 之后再 `self.stream = CMIOExtensionStream(..., source: self)` 比 placeholder shim 干净" | 保留 | 跟参考项目一致，保留 |
+| 6 | "`com.apple.security.application-groups` 让 cmiod 把 host 当 sysext 自家父 app 做'回环屏蔽'，必须删掉" | 撤回（**直接造成 `extension category returned error` / 起不来**） | 删除后 sysextd 立刻拒绝激活；恢复后 `OSSystemExtensionRequest` 变正常的 _await user approval_ → _activated_。已强制回滚并在 [SimCamApp.entitlements](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/Resources/SimCamApp.entitlements) 注释里禁止后人再删 |
+| 7 | "25 个僵尸 `[terminated waiting to uninstall on reboot]` 阻塞激活，必须重启" | 撤回 | 没有任何 sysextd reject log 支持；同时拿 ldenoue 项目对照，僵尸只是视觉上难看，实际不阻塞激活。已撤回 [scripts/install-systemext.sh L50-L62](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/install-systemext.sh#L50-L62) 阈值 `exit 1` |
+| 8 | "`kCMIOStreamPropertyDirection == 1` 一定就是 sink stream" | 撤回（**真正的 root cause**） | host 第一帧 `CMSimpleQueueEnqueue` 返回 `-12773 / QueueIsFull`，sysext 端没有任何 sink `startStream()` 触发；说明根本没在向真正的 `SimCam.Sink` 塞帧。Codex 改成按 stream **name** 优先匹配。修复后 QuickTime 实时画面正常 |
+| 9 | "QuickTime 看到扫描线 = source stream 没发布" | 撤回 | 扫描线恰好是 [SimCamCMIOStreamSource.tickDemo()](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamExtension/SimCamCMIODevice.swift) 的 demo fallback。出现扫描线证明 **source stream 已经在跑**，问题在 sink 链路 |
 
 ---
 
@@ -218,8 +217,6 @@ QuickTime
 
 ## 8. 关联文档
 
-- [docs/HANDOFF-2026-06-03.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/HANDOFF-2026-06-03.md) — 现场快照 + 最终修复（Codex 写的，权威）
 - [docs/signing-and-tcc.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/signing-and-tcc.md) — 自签 cert / Personal Team / 重签流程
 - [docs/no-developer-account.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md) — 没有 paid Apple Developer Program 时的限制
 - [docs/permissions-and-flow.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/permissions-and-flow.md) — TCC、Camera、Screen Capture 的权限链
-- 本文档 [docs/CMIO-LESSONS-LEARNED.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md) — 长期踩坑教训

@@ -13,20 +13,20 @@ SimCam 的 host app 和 CMIO Camera Extension 都被签名锁到一张
 
 不能用：
 
-* ❌ Apple Development（Personal Team） —— Apple 不给 Personal Team 颁
+* Apple Development（Personal Team） —— Apple 不给 Personal Team 颁
   System Extension capability，profile 申请会直接报错
   *"Personal development teams ... do not support the System Extension
   capability"*。
-* ❌ 纯 ad-hoc 签名（`codesign --sign -`） —— 能装上 system extension，
+* 纯 ad-hoc 签名（`codesign --sign -`） —— 能装上 system extension，
   但 TCC 用 cdhash 锁 designated requirement，每次 rebuild cdhash 一变，
   Camera / Screen Recording / Microphone 授权全部失效，需要在系统设置里
   手动删了重批，开发体验崩。
-* ❌ Apple Developer Program (Developer ID) —— 这是工业最优解，但需要
+* Apple Developer Program (Developer ID) —— 这是工业最优解，但需要
   $99/年，且 SimCam 是开源项目，没法把私钥入仓共享。
 
 能用，且我们选择的：
 
-* ✅ **self-signed certificate**，CN = `SimCam Local Dev`，每个开发者
+* **self-signed certificate**，CN = `SimCam Local Dev`，每个开发者
   本地 keychain 一份。codesign 用 CN 签，TCC designated requirement 锁
   到 CN（而不是 cdhash），所以**重 build cdhash 怎么变都不影响授权记忆**。
 
@@ -57,10 +57,10 @@ System Extension 的激活路径有三个独立校验门：
 
 | 签名方式 | DR 内容 | rebuild 后 DR 是否稳定 |
 | --- | --- | --- |
-| Apple Developer ID | `... certificate leaf[subject.OU] = "<TeamID>"` | ✅ 稳定（锁 team） |
-| Apple Development | 类似上 | ✅ 稳定 |
-| **self-signed CA**（我们的方案） | `identifier "..." and certificate leaf[subject.CN] = "SimCam Local Dev"` | ✅ 稳定（锁 CN） |
-| **ad-hoc** (`-`) | `... certificate leaf = H"<cdhash>"` | ❌ 每次 build 都变 |
+| Apple Developer ID | `... certificate leaf[subject.OU] = "<TeamID>"` | 是（锁 team） |
+| Apple Development | 类似上 | 是 |
+| **self-signed CA**（我们的方案） | `identifier "..." and certificate leaf[subject.CN] = "SimCam Local Dev"` | 是（锁 CN） |
+| **ad-hoc** (`-`) | `... certificate leaf = H"<cdhash>"` | 否 — 每次 build 都变 |
 
 参考：
 

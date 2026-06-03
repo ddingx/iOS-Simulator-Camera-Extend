@@ -82,50 +82,6 @@ flowchart LR
 
 The wire protocol (48-byte v2 header with `cameraSlot`) is in [SimCamHook.h](Sources/SimCamHook/SimCamHook.h).
 
-<details>
-<summary>Legacy architecture diagram (PNG)</summary>
-
-<div align="center">
-<img src="docs/assets/architecture.png" alt="Architecture" width="900" />
-</div>
-
-> ⚠️ **This PNG predates the self-signed CA workflow.** The bottom-right footnote *"Requires the macOS path (partial SIP relaxation)"* is **out-of-date**: today's recommended path keeps SIP fully enabled — no relaxation required. `csrutil enable --without kext --without debug` is only needed in two edge cases: lldb-attach-debugging the sysext, or insisting on the legacy ad-hoc-signed sysext path. See [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md). Use the mermaid diagram + ASCII fallback above as the source of truth.
-
-</details>
-
-<details>
-<summary>ASCII fallback</summary>
-
-```
-┌────────────────────── macOS host ─────────────────────────┐
-│  SimCamApp.app  (menubar)                                 │
-│   ┌──────────────────────────────────────────────────┐    │
-│   │  SimCamEngine                                    │    │
-│   │   ├─ FrameProducer (per slot: back / front)      │    │
-│   │   │   • CameraDeviceFrameProducer (AVFoundation) │    │
-│   │   │   • ScreenFrameProducer (ScreenCaptureKit)   │    │
-│   │   │       ├─ display / window                    │    │
-│   │   │       └─ followSimulator (locks onto window) │    │
-│   │   │   • Image / Video / QR / DemoCard            │    │
-│   │   ├─→ CMIO sink ──► SimCamExtension.systemextension   │
-│   │   └─→ LocalSocketFrameServer ──► /tmp/com.simcam.…sock │
-│   └──────────────────────────────────────────────────┘    │
-│                                                           │
-│   ┌─────────── iOS Simulator ────────────────────────┐    │
-│   │  YourApp  (stock AVFoundation, untouched)        │    │
-│   │   ▲                                              │    │
-│   │   │  swizzle  (DYLD_INSERT_LIBRARIES)            │    │
-│   │   │                                              │    │
-│   │  libSimCamHook.dylib                             │    │
-│   │   • fakeBack / fakeFront AVCaptureDevice         │    │
-│   │   • frame puller @ unix socket                   │    │
-│   │   • fan out to sample buffer / metadata / preview│    │
-│   └──────────────────────────────────────────────────┘    │
-└───────────────────────────────────────────────────────────┘
-```
-
-</details>
-
 ---
 
 ## What works today
@@ -139,7 +95,7 @@ Both pipelines are wired up and can run **at the same time**:
 
 **Both pipelines share the same source**: pick *FaceTime HD / Image / Video / QR / Simulator passthrough / any window or display* in the SimCam menubar, and what QuickTime sees and what your iOS app inside the simulator sees are **identical, switched in sync**.
 
-> ⚠️ **An iOS app inside the Simulator cannot reach the CMIO sysext directly** — the iOS SDK has no CMIO surface area. This is an Apple platform limitation, not something this project can solve, and it is the same for the commercial SimCam. So "iOS apps inside the simulator see the SimCam feed" must go through the hook pipeline. This does **not** contradict the SimCam tagline "without changing anything in your app" — that means **you don't change your iOS app's code / SDKs / bundle id**, not that no Mac-side injection is required.
+> Note: **An iOS app inside the Simulator cannot reach the CMIO sysext directly** — the iOS SDK has no CMIO surface area. This is an Apple platform limitation, not something this project can solve, and it is the same for the commercial SimCam. So "iOS apps inside the simulator see the SimCam feed" must go through the hook pipeline. This does **not** contradict the SimCam tagline "without changing anything in your app" — that means **you don't change your iOS app's code / SDKs / bundle id**, not that no Mac-side injection is required.
 
 ---
 
@@ -165,13 +121,13 @@ Both pipelines are wired up and can run **at the same time**:
 
 | Scenario | CMIO works | Notes |
 |---|---|---|
-| Screen / movie demo (QuickTime, OBS) | ✅ | Pick SimCam Virtual Camera, route any desktop region or video file into a recording |
-| Video meetings (Zoom, Teams, Google Meet, Webex) | ✅ | Replace your camera feed with a video file / QR / desktop slide without disturbing the real one |
-| WebRTC (Chrome, Safari, Firefox) | ✅ | The browser picks SimCam Virtual Camera through AVCaptureDevice — handy for automated test fixtures |
-| Live streaming (OBS, Streamlabs) | ✅ | Feed a Display or app window into OBS as a Video Capture Device |
-| Automated UI testing / screenshot fixtures | ✅ | Use the `videoFile` source to pin a deterministic frame and run end-to-end tests on your camera UI |
-| iOS app **inside iOS Simulator** seeing custom camera frames | ❌ | The iOS SDK has no CMIO; you must use the [Simulator hook pipeline](#bring-up-the-simulator-hook-pipeline-let-your-ios-app-see-the-feed) |
-| **Real iOS device** | ❌ | iOS device cameras live outside the sandbox; impossible without kernel hooks. Out of scope here |
+| Screen / movie demo (QuickTime, OBS) | Yes | Pick SimCam Virtual Camera, route any desktop region or video file into a recording |
+| Video meetings (Zoom, Teams, Google Meet, Webex) | Yes | Replace your camera feed with a video file / QR / desktop slide without disturbing the real one |
+| WebRTC (Chrome, Safari, Firefox) | Yes | The browser picks SimCam Virtual Camera through AVCaptureDevice — handy for automated test fixtures |
+| Live streaming (OBS, Streamlabs) | Yes | Feed a Display or app window into OBS as a Video Capture Device |
+| Automated UI testing / screenshot fixtures | Yes | Use the `videoFile` source to pin a deterministic frame and run end-to-end tests on your camera UI |
+| iOS app **inside iOS Simulator** seeing custom camera frames | No | The iOS SDK has no CMIO; you must use the [Simulator hook pipeline](#bring-up-the-simulator-hook-pipeline-let-your-ios-app-see-the-feed) |
+| **Real iOS device** | No | iOS device cameras live outside the sandbox; impossible without kernel hooks. Out of scope here |
 
 ### What you need (CMIO-only)
 
@@ -228,7 +184,7 @@ Walk these three in order — they cover roughly 99% of failures:
 
 ### Required
 
-| | Notes |
+| Item | Notes |
 |---|---|
 | **macOS** | 13+ (verified on 14 / 15 / 26) |
 | **Xcode** | 15+, with `xcodebuild` / `xcrun simctl` / `codesign` / `security` available |
@@ -237,18 +193,18 @@ Walk these three in order — they cover roughly 99% of failures:
 
 ### Required only for the CMIO sysext pipeline
 
-| | Notes |
+| Item | Notes |
 |---|---|
 | **System-extension developer mode** | `sudo systemextensionsctl developer on` (resets on reboot, re-run after every restart) |
 | **sudo access** | Installing a sysext requires copying the host bundle to `/Applications/` and `chown root:wheel` (sysextd's hard rule) |
 | **Local self-signed cert: SimCam Local Dev** | One-shot `make bootstrap-cert`, generated and imported into login keychain; the private key is **never** committed |
 
-### **Not** required
+### Not required
 
-- ❌ Paid Apple Developer Program ($99/yr) — replaced with a local self-signed cert
-- ❌ Personal Team — verified that Personal Teams don't support the System Extension capability
-- ❌ Disabling SIP, jailbreaking
-- ❌ Changing your iOS app's source / SDK / bundle id
+- Paid Apple Developer Program ($99/yr) — replaced with a local self-signed cert
+- Personal Team — verified that Personal Teams don't support the System Extension capability
+- Disabling SIP, jailbreaking
+- Changing your iOS app's source / SDK / bundle id
 
 ---
 
@@ -277,7 +233,7 @@ make run                # = make install + open SimCamApp.app
 ### Bring up the Simulator hook pipeline (let your iOS app see the feed)
 
 ```bash
-# 7. Boot a simulator and install the demo app
+# Boot a simulator and install the demo app
 open -a Simulator
 xcrun simctl boot "iPhone 17 Pro" 2>/dev/null || true
 
@@ -288,7 +244,7 @@ xcodebuild -project SimCam.xcodeproj -scheme SimCamDemo \
 xcrun simctl install booted \
     ~/Library/Developer/Xcode/DerivedData/SimCam-*/Build/Products/Debug-iphonesimulator/SimCamDemoApp.app
 
-# 8. Inject the hook and launch the demo (the host SimCamApp must be running)
+# Inject the hook and launch the demo (the host SimCamApp must be running)
 ./scripts/inject-simulator.sh dev.simcam.demo
 
 # Expected: the demo app's back / front camera previews inside the simulator
@@ -357,7 +313,6 @@ A longer checklist lives in [docs/permissions-and-flow.md](docs/permissions-and-
 | [docs/permissions-and-flow.md](docs/permissions-and-flow.md) | Permission matrix (screen recording / camera / system extensions), Hardened Runtime entitlements, full host → simulator frame flow, troubleshooting |
 | [docs/no-developer-account.md](docs/no-developer-account.md) | Long-form runbook: end-to-end for both pipelines, TCC, SIP, `developer on`, recovery |
 | [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) | **CMIO post-mortem** — 9 reversals / 5 missed pieces of evidence / 7 long-term tripwires. Read before touching CMIO code |
-| [docs/HANDOFF-2026-06-03.md](docs/HANDOFF-2026-06-03.md) | CMIO debugging session snapshot + the final sink-stream-selection root cause (kept as historical record) |
 | [RUN_NOTES.md](RUN_NOTES.md) | Field notes for the iOS Simulator hook path (dyld / TCC / SC private API) |
 | [Sources/SimCamHook/SimCamHook.h](Sources/SimCamHook/SimCamHook.h) | Wire protocol v2 (48-byte header, `cameraSlot`) |
 

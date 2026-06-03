@@ -11,10 +11,10 @@
 > - 链路 2（iOS Simulator hook）：完全不需要降级 SIP、不需要任何系统授权——只要 build 出 dylib 就能注入。
 >
 > **当前已验证范围（macOS 26.2 Tahoe / Xcode 26.2 / iOS Simulator 26.2）**：
-> - ✅ macOS：System Extension 通过 sysextd 校验、`activated enabled`、被 lazy launch
-> - ✅ macOS：host `AVCaptureDevice` 看到 `SimCam Virtual Camera`，`AVCaptureSession` 8 秒收 241 帧 @ 1920×1080 / 30fps
-> - ✅ Simulator：被测 demo app（`AVCaptureDevice.DiscoverySession` 标准 API）枚举到 `SimCam Back Camera (back)` + `SimCam Front Camera (front)`
-> - ✅ Simulator：`AVCaptureVideoPreviewLayer` 接管，host 的 demo 帧（绿色弧 + 橙点）显示在被测 app 里，进程不崩
+> - macOS：System Extension 通过 sysextd 校验、`activated enabled`、被 lazy launch
+> - macOS：host `AVCaptureDevice` 看到 `SimCam Virtual Camera`，`AVCaptureSession` 8 秒收 241 帧 @ 1920×1080 / 30fps
+> - Simulator：被测 demo app（`AVCaptureDevice.DiscoverySession` 标准 API）枚举到 `SimCam Back Camera (back)` + `SimCam Front Camera (front)`
+> - Simulator：`AVCaptureVideoPreviewLayer` 接管，host 的 demo 帧（绿色弧 + 橙点）显示在被测 app 里，进程不崩
 
 ---
 
@@ -118,8 +118,8 @@ AVCaptureDevice list (2):
 
 Xcode build 后实际产物有两份：
 
-- `Build/Intermediates.noindex/.../SimCamHook.build/Objects-normal/<arch>/Binary/libSimCamHook.dylib`：**未签名**，⚠️ 不能用
-- `Build/Products/Debug-iphonesimulator/libSimCamHook.dylib`：universal + ad-hoc 签 ✅ 用这个
+- `Build/Intermediates.noindex/.../SimCamHook.build/Objects-normal/<arch>/Binary/libSimCamHook.dylib`：**未签名**，不能用
+- `Build/Products/Debug-iphonesimulator/libSimCamHook.dylib`：universal + ad-hoc 签，**用这个**
 
 `scripts/inject-simulator.sh` 已经写死只搜 `Build/Products/Debug-iphonesimulator/` 路径，如果你手动注入，记得也用这个路径。
 
@@ -391,7 +391,7 @@ csrutil enable
 reboot
 ```
 
-> ⚠️ **只在自己的开发机做这个**。SimCam 默认推荐路线是「**SIP 完整启用** + self-signed CA + `systemextensionsctl developer on`」，正常运行 / 安装 / 卸载 / 重签都不需要降级 SIP。本节只为「真的不想用 self-signed CA」或「真的要 attach 调试 sysext」的人保留作为最小化降级方案，避免你看到外网帖子去 `csrutil disable`（那是过度操作）。
+> 警告：**只在自己的开发机做这个**。SimCam 默认推荐路线是「**SIP 完整启用** + self-signed CA + `systemextensionsctl developer on`」，正常运行 / 安装 / 卸载 / 重签都不需要降级 SIP。本节只为「真的不想用 self-signed CA」或「真的要 attach 调试 sysext」的人保留作为最小化降级方案，避免你看到外网帖子去 `csrutil disable`（那是过度操作）。
 
 #### 2.2.2 启用 system-extension developer mode
 

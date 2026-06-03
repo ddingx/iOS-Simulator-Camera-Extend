@@ -422,10 +422,10 @@ make run                          # = make install + open /Applications/SimCamAp
 
 | commit | 内容 | mac camera 是否能用 | sysext 是否能装 | TCC 是否稳定 |
 |---|---|---|---|---|
-| `e03403d` | 初始 commit。ad-hoc 签 + 没开 Hardened Runtime | ✅ | ✅ | ❌ rebuild 失忆 |
-| `3bd7833` | 切到 Personal Team 签名 → 开了 Hardened Runtime | ❌ entitlement 漏配 silent denied | ❌ Personal Team 不支持 System Extension capability | n/a |
-| `cc501de` | 加 [com.apple.security.device.camera + audio-input + disable-library-validation](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/Resources/SimCamApp.entitlements) | ✅ | ❌ 仍然受 Personal Team 限制 | n/a |
-| 当前 | 切到本地 self-signed CA `SimCam Local Dev` + `make bootstrap-cert` / `make install` / `make run` | ✅ | ✅ 走 `systemextensionsctl developer on` 接受任意签 | ✅ DR 锁 CN，cdhash 怎么变都不影响 |
+| `e03403d` | 初始 commit。ad-hoc 签 + 没开 Hardened Runtime | 是 | 是 | 否 — rebuild 失忆 |
+| `3bd7833` | 切到 Personal Team 签名 → 开了 Hardened Runtime | 否 — entitlement 漏配 silent denied | 否 — Personal Team 不支持 System Extension capability | n/a |
+| `cc501de` | 加 [com.apple.security.device.camera + audio-input + disable-library-validation](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/Resources/SimCamApp.entitlements) | 是 | 否 — 仍然受 Personal Team 限制 | n/a |
+| 当前 | 切到本地 self-signed CA `SimCam Local Dev` + `make bootstrap-cert` / `make install` / `make run` | 是 | 是 — 走 `systemextensionsctl developer on` 接受任意签 | 是 — DR 锁 CN，cdhash 怎么变都不影响 |
 
 **两条教训**：
 

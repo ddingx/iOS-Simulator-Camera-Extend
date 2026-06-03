@@ -82,50 +82,6 @@ flowchart LR
 
 帧线协议（48 字节 v2 头 + `cameraSlot`）见 [SimCamHook.h](Sources/SimCamHook/SimCamHook.h)。
 
-<details>
-<summary>历史架构图（PNG）</summary>
-
-<div align="center">
-<img src="docs/assets/architecture.png" alt="Architecture" width="900" />
-</div>
-
-> ⚠️ **此 PNG 早于 self-signed CA 工作流落地**，右下角的 *"Requires the macOS path (partial SIP relaxation)"* 已**过时**：当前推荐路线 SIP 完全启用，不需要任何 SIP 降级。`csrutil enable --without kext --without debug` 只在「想用 lldb attach 调试 sysext」或「坚持走 ad-hoc 签 sysext 老路」两种例外时才需要，详见 [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md)。以上面的 mermaid 图 + ASCII fallback 为准。
-
-</details>
-
-<details>
-<summary>ASCII 版（fallback）</summary>
-
-```
-┌────────────────────── macOS host ─────────────────────────┐
-│  SimCamApp.app  (menubar)                                 │
-│   ┌──────────────────────────────────────────────────┐    │
-│   │  SimCamEngine                                    │    │
-│   │   ├─ FrameProducer (per slot: back / front)      │    │
-│   │   │   • CameraDeviceFrameProducer (AVFoundation) │    │
-│   │   │   • ScreenFrameProducer (ScreenCaptureKit)   │    │
-│   │   │       ├─ display / window                    │    │
-│   │   │       └─ followSimulator (跟随 Simulator 窗口) │    │
-│   │   │   • Image / Video / QR / DemoCard            │    │
-│   │   ├─→ IOSurface bridge ──► SimCamExtension.systemextension   │
-│   │   └─→ LocalSocketFrameServer ──► /tmp/com.simcam.…sock │
-│   └──────────────────────────────────────────────────┘    │
-│                                                           │
-│   ┌─────────── iOS Simulator ────────────────────────┐    │
-│   │  YourApp  (stock AVFoundation, untouched)        │    │
-│   │   ▲                                              │    │
-│   │   │  swizzle  (DYLD_INSERT_LIBRARIES)            │    │
-│   │   │                                              │    │
-│   │  libSimCamHook.dylib                             │    │
-│   │   • fakeBack / fakeFront AVCaptureDevice         │    │
-│   │   • frame puller @ unix socket                   │    │
-│   │   • fan out to sample buffer / metadata / preview│    │
-│   └──────────────────────────────────────────────────┘    │
-└───────────────────────────────────────────────────────────┘
-```
-
-</details>
-
 ---
 
 ## 现在能做什么
@@ -139,7 +95,7 @@ flowchart LR
 
 **两条链路共享同一个画面源**：你在 SimCam menubar 里把 back/front 切到 *FaceTime HD / Image / Video / QR / Simulator passthrough / 任意窗口或 Display*，QuickTime 看到的画面、simulator 内 iOS app 看到的画面**完全同源、同步切换**。
 
-> ⚠️ **iOS Simulator 内 iOS app 不可能直接走 CMIO** —— iOS SDK 里根本没有 CMIO 接口，这是 Apple 平台的硬限制（不是本项目能解决的，SimCam 商业版同样如此）。所以"让 simulator 里 iOS app 看到 SimCam 画面"必须走 hook 链路。这跟 SimCam 官网"without changing anything in your app"承诺并不矛盾——指的是**你 iOS app 代码不改 / 不引 SDK / 不换 bundle id**，并不是不需要在 Mac 一侧做注入步骤。
+> 注意：**iOS Simulator 内 iOS app 不可能直接走 CMIO** —— iOS SDK 里根本没有 CMIO 接口，这是 Apple 平台的硬限制（不是本项目能解决的，SimCam 商业版同样如此）。所以"让 simulator 里 iOS app 看到 SimCam 画面"必须走 hook 链路。这跟 SimCam 官网"without changing anything in your app"承诺并不矛盾——指的是**你 iOS app 代码不改 / 不引 SDK / 不换 bundle id**，并不是不需要在 Mac 一侧做注入步骤。
 
 ---
 
@@ -165,13 +121,13 @@ flowchart LR
 
 | 场景 | 走 CMIO | 说明 |
 |---|---|---|
-| 录屏 / 录视频 demo（QuickTime, OBS） | ✅ | 直接选 SimCam Virtual Camera，把任意桌面区域 / 视频文件录进去 |
-| 视频会议（Zoom, Teams, Google Meet, 腾讯会议, 飞书） | ✅ | 把摄像头换成本地视频文件 / 二维码 / 桌面演示，**不影响**自家摄像头 |
-| WebRTC（Chrome, Safari, Firefox） | ✅ | 浏览器走 AVCaptureDevice 选 SimCam Virtual Camera，方便自动化测试 |
-| 直播（OBS, Streamlabs） | ✅ | 把 Display / 应用窗口当摄像头喂进 OBS 的 Video Capture Device |
-| 自动化 UI 测试 / 截图素材 | ✅ | 用 `videoFile` 源喂固定画面，跑 e2e 测试相机界面 |
-| **iOS Simulator 里**的 iOS app 看到自定义相机画面 | ❌ | iOS SDK 没有 CMIO，必须走 [Simulator hook 链路](#跑通-simulator-hook-链路让-ios-app-看到画面) |
-| **iOS 真机** | ❌ | iOS 真机相机在沙箱外，无内核级 hook 不可能；本仓库不涉及 |
+| 录屏 / 录视频 demo（QuickTime, OBS） | 是 | 直接选 SimCam Virtual Camera，把任意桌面区域 / 视频文件录进去 |
+| 视频会议（Zoom, Teams, Google Meet, 腾讯会议, 飞书） | 是 | 把摄像头换成本地视频文件 / 二维码 / 桌面演示，**不影响**自家摄像头 |
+| WebRTC（Chrome, Safari, Firefox） | 是 | 浏览器走 AVCaptureDevice 选 SimCam Virtual Camera，方便自动化测试 |
+| 直播（OBS, Streamlabs） | 是 | 把 Display / 应用窗口当摄像头喂进 OBS 的 Video Capture Device |
+| 自动化 UI 测试 / 截图素材 | 是 | 用 `videoFile` 源喂固定画面，跑 e2e 测试相机界面 |
+| **iOS Simulator 里**的 iOS app 看到自定义相机画面 | 否 | iOS SDK 没有 CMIO，必须走 [Simulator hook 链路](#跑通-simulator-hook-链路让-ios-app-看到画面) |
+| **iOS 真机** | 否 | iOS 真机相机在沙箱外，无内核级 hook 不可能；本仓库不涉及 |
 
 ### 运行 CMIO 链路需要什么
 
@@ -228,7 +184,7 @@ system_profiler SPCameraDataType | grep -A2 SimCam
 
 ### 必须
 
-| | 说明 |
+| 项 | 说明 |
 |---|---|
 | **macOS** | 13+（开发机用 macOS 14/15/26 都验过） |
 | **Xcode** | 15+，命令行工具齐全（`xcodebuild` / `xcrun simctl` / `codesign` / `security`）|
@@ -237,18 +193,18 @@ system_profiler SPCameraDataType | grep -A2 SimCam
 
 ### 仅 CMIO sysext 链路需要
 
-| | 说明 |
+| 项 | 说明 |
 |---|---|
 | **SIP developer mode** | `sudo systemextensionsctl developer on`（重启失效，每次开机要重开一次） |
 | **sudo 权限** | 装 sysext 必须把 host bundle 拷到 `/Applications/` 并 `chown root:wheel`（sysextd 的硬约束） |
 | **本地自签名证书 SimCam Local Dev** | 一次性，`make bootstrap-cert` 生成并导入 keychain；私钥不入仓 |
 
-### **不需要**
+### 不需要
 
-- ❌ 付费 Apple Developer Program（$99/年）—— 用本地自签名证书替代
-- ❌ Personal Team —— 已验证 Personal Team 不支持 System Extension capability
-- ❌ 关 SIP / 越狱
-- ❌ 改 iOS app 代码、装 SDK、换 bundle id
+- 付费 Apple Developer Program（$99/年）—— 用本地自签名证书替代
+- Personal Team —— 已验证 Personal Team 不支持 System Extension capability
+- 关 SIP / 越狱
+- 改 iOS app 代码、装 SDK、换 bundle id
 
 ---
 
@@ -277,7 +233,7 @@ make run                # = make install + open SimCamApp.app
 ### 跑通 Simulator hook 链路（让 iOS app 看到画面）
 
 ```bash
-# 7. 启动一台 simulator + 装 demo app
+# 启动一台 simulator + 装 demo app
 open -a Simulator
 xcrun simctl boot "iPhone 17 Pro" 2>/dev/null || true
 
@@ -288,7 +244,7 @@ xcodebuild -project SimCam.xcodeproj -scheme SimCamDemo \
 xcrun simctl install booted \
     ~/Library/Developer/Xcode/DerivedData/SimCam-*/Build/Products/Debug-iphonesimulator/SimCamDemoApp.app
 
-# 8. 注入 hook 并启动 demo（host SimCamApp 必须在跑）
+# 注入 hook 并启动 demo（host SimCamApp 必须在跑）
 ./scripts/inject-simulator.sh dev.simcam.demo
 
 # 期望：simulator 里 SimCamDemoApp 的 back / front 摄像头预览
@@ -357,7 +313,6 @@ xcrun simctl install booted /path/to/YourApp.app
 | [docs/permissions-and-flow.md](docs/permissions-and-flow.md) | 屏幕录制 / 摄像头 / 系统扩展三类权限矩阵、Hardened Runtime entitlement、host → simulator 完整帧流、故障排查 |
 | [docs/no-developer-account.md](docs/no-developer-account.md) | 长版 runbook：双链路端到端步骤、TCC、SIP、`developer on`、踩坑恢复 |
 | [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) | **CMIO 实现踩坑历史**：9 次反转 / 5 个关键证据 / 7 条长期红线，改 CMIO 代码前先扫这一份 |
-| [docs/HANDOFF-2026-06-03.md](docs/HANDOFF-2026-06-03.md) | CMIO 调试现场快照 + sink stream 选错根因的最终修复（保留作历史归档） |
 | [RUN_NOTES.md](RUN_NOTES.md) | iOS Simulator hook 链路踩到的非显然坑 + 根因（dyld / TCC / SC 私有 API） |
 | [Sources/SimCamHook/SimCamHook.h](Sources/SimCamHook/SimCamHook.h) | 帧线协议 v2（48 字节头 + `cameraSlot`） |
 

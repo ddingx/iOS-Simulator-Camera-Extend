@@ -38,7 +38,7 @@ xcodebuild -project SimCam.xcodeproj -scheme SimCamDemo \
 Xcode 编出来的产物有两份：
 
 - `Build/Intermediates.noindex/.../SimCamHook.build/Objects-normal/<arch>/Binary/libSimCamHook.dylib` —— **未签名**，不能用
-- `Build/Products/Debug-iphonesimulator/libSimCamHook.dylib` —— universal + ad-hoc 签 ✅
+- `Build/Products/Debug-iphonesimulator/libSimCamHook.dylib` —— universal + ad-hoc 签，**用这个**
 
 **修法**：注入脚本只走 `Build/Products/Debug-iphonesimulator/` 路径（`scripts/inject-simulator.sh` 已写死）。手动注入时记得：
 
@@ -218,7 +218,6 @@ sudo log stream --predicate 'process == "sysextd"' --level info
 
 我们把它单独整理成：
 
-- [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) —— 9 次反转 / 5 个关键证据 / 7 条长期红线，**改 CMIO 代码或排查 CMIO 问题前必读**
-- [docs/HANDOFF-2026-06-03.md](docs/HANDOFF-2026-06-03.md) —— 当时调试现场快照 + Codex 给的最终修复（保留作历史归档）
-- [docs/permissions-and-flow.md §2.6](docs/permissions-and-flow.md) —— host → sysext sink stream 的当前架构图与代码索引
-- [docs/no-developer-account.md §2.5](docs/no-developer-account.md) —— macOS 链路常见坑表（`error 8 codeValidationFailed` / `-12773 QueueIsFull` / sink stream 选错）
+- [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) — 9 次反转 / 5 个关键证据 / 7 条长期红线，**改 CMIO 代码或排查 CMIO 问题前必读**
+- [docs/permissions-and-flow.md §2.6](docs/permissions-and-flow.md) — host → sysext sink stream 的当前架构图与代码索引
+- [docs/no-developer-account.md §2.5](docs/no-developer-account.md) — macOS 链路常见坑表（`error 8 codeValidationFailed` / `-12773 QueueIsFull` / sink stream 选错）
