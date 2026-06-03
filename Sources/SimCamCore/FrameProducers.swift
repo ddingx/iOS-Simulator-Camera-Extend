@@ -294,6 +294,11 @@ public enum CameraDiscovery {
     /// 真实 Extension 注册成什么名字，这里就识别什么名字。
     public static let virtualCameraName = "SimCam Virtual Camera"
 
+    /// SimCam 虚拟摄像头在 Camera Extension 注册时使用的 UUID（device UID）。
+    /// host 端 HAL 层用 `kCMIODevicePropertyDeviceUID` 反查 CMIODeviceID 时
+    /// 用这个常量做 needle，避免 host 端 AVFoundation 被 cmiod 屏蔽的回环坑。
+    public static let virtualCameraDeviceUID = "5C8F9A6E-2D11-4A5D-8E6E-3F1C4B1E0001"
+
     /// 列出 macOS 端所有可用摄像头。
     /// - Parameter includeSimCamVirtual: 是否包含 SimCam 自家虚拟相机。
     ///   默认 `false`：避免「back source 选 SimCam Virtual Camera → 自指 cycle」。

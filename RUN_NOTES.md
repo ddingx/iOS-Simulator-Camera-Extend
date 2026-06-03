@@ -1,9 +1,12 @@
-# Field Notes（踩坑笔记 / 中文）
+# Field Notes（iOS Simulator hook 路线踩坑笔记 / 中文）
 
 > 这是从 0 复刻 [SimCam](https://simcam.swmansion.com/) 过程中积累的实战笔记。
-> README 已经覆盖「项目是什么 / 怎么跑」，这里只记录**调试过程踩到的非显然坑**和对应根因。
+> README 已经覆盖「项目是什么 / 怎么跑」，这里只记录**调试 iOS Simulator hook 这条链路**踩到的非显然坑和对应根因。
 >
-> 最后更新：2026-06-02
+> CMIO（macOS 虚拟摄像头）那条链路的踩坑历史是单独一份长文档：[docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md)。
+> 签名 / TCC 的设计动机和详细原理在：[docs/signing-and-tcc.md](docs/signing-and-tcc.md)。
+>
+> 最后更新：2026-06-03
 
 如果你只是想跑通项目，请看 [README.md](README.md) 与 [docs/no-developer-account.md](docs/no-developer-account.md)。
 
@@ -58,52 +61,28 @@ codesign -dvv Build/Products/Debug-iphonesimulator/libSimCamHook.dylib
 
 ## 4. ad-hoc 签名导致 TCC 授权反复失效 —— 用 self-signed CA `SimCam Local Dev` 修
 
-**现象**：每次重 build 后，「系统设置 → 隐私与安全性 → 屏幕录制 / 摄像头」里 SimCamApp 的勾仍然在，但实际授权早已失效。必须先到设置里**把 app 移除**、再重新打开 app 让它重弹一次对话框，才能恢复。每次 build 都要重来一遍，奇葩到怀疑人生。
+**现象**：每次重 build 后，「系统设置 → 隐私与安全性 → 屏幕录制 / 摄像头」里 SimCamApp 的勾仍然在，但实际授权早已失效。必须先到设置里**把 app 移除**、再重新打开 app 让它重弹一次对话框，才能恢复。每次 build 都要重来一遍。
 
-**根因**：
-
-TCC 的索引键不是 `(bundle-id, cdhash)`，而是 `(bundle-id, code signing requirement)`（俗称 DR / csreq）。这个 DR 的形态取决于签名方式：
-
-| 签名方式 | DR 内容 | rebuild 后是否稳定 |
-| --- | --- | --- |
-| `codesign -s -` (ad-hoc) | `... certificate leaf = H"<cdhash>"` | ❌ 每次 build cdhash 变就废 |
-| Apple Development（Personal Team 免费签） | `anchor apple generic and certificate leaf[subject.CN] = "Apple Development: <Apple ID>"` | ✅ 但**不能用**：Personal Team 不支持 System Extension capability，profile 直接报错 *"Personal development teams ... do not support the System Extension capability"* |
-| Apple Developer Program ($99/年) | `... certificate leaf[subject.OU] = "<TeamID>"` | ✅ 但开源项目无法把团队私钥入仓共享 |
-| **self-signed CA `SimCam Local Dev`** | `identifier "..." and certificate leaf[subject.CN] = "SimCam Local Dev"` | ✅ 锁 CN，cdhash 怎么变都不影响 |
-
-Apple DTS Quinn 在 [forums/thread/819406](https://developer.apple.com/forums/thread/819406) / [forums/thread/678816](https://developer.apple.com/forums/thread/678816) 直接确认了"TCC needs a stable signing identity"。完整原理见 [docs/signing-and-tcc.md](docs/signing-and-tcc.md)。
+**根因**：TCC 的索引键不是 `(bundle-id, cdhash)`，而是 `(bundle-id, code signing requirement / DR)`。ad-hoc 签名的 DR 把 cdhash 锁死在叶子里，每次 build cdhash 一变 DR 就废、TCC 认不出来；Personal Team 又不支持 System Extension capability；Apple Developer Program 不能把 TeamID 私钥共享出去。所以本仓库走 self-signed CA `SimCam Local Dev`，DR 锁 CN 不锁 cdhash。
 
 **修法**（项目里已经做好了）：
 
-1. **一次性生成本地 self-signed CA + 叶子证书** —— 私钥**不入仓**，每个开发者各自生成一份：
-   ```bash
-   make bootstrap-cert
-   ```
-   这条命令做的事：在 login.keychain-db 里生成一对 ECC P-256 key，CN = `SimCam Local Dev`，EKU = codeSigning，并把它标成"始终信任"。
-2. **macOS 端**（host + system extension）签名走这张 CN：[SimCam.xcodeproj](SimCam.xcodeproj) 里 `SimCamApp` 和 `SimCamCameraExtension` 两个 target 的 `CODE_SIGN_IDENTITY = "SimCam Local Dev"`，配 Hardened Runtime + 必需的 entitlements（`system-extension.install` / `device.camera` / `device.audio-input` / `cs.disable-library-validation` / `application-groups`）。
-3. **iOS 端**（hook dylib + demo app）继续 ad-hoc。原因：iOS Simulator 的 dyld 在被测进程是 ad-hoc 时不会接受签了非 ad-hoc cert 的注入 dylib；硬塞反而废掉注入路径。这两个 target 在 .pbxproj 里强制 `CODE_SIGN_IDENTITY = "-"`，**不要**改。
-4. **一次性清掉旧 ad-hoc 残留**（很重要，否则旧 cdhash 条目还卡着）：
-   ```bash
-   make reset-tcc      # = scripts/reset-tcc.sh
-   ```
-   它会 `tccutil reset` Camera / Microphone / ScreenCapture / SystemPolicyAllFiles 这几条针对 `dev.simcam.app` 的记录，并提示你手动 `sudo rm -rf /Applications/SimCamApp.app` 清掉旧拷贝。
-5. **重新装一遍** —— `make install` 会重签 + 拷到 `/Applications/`（sysextd 硬约束），`make run` 是 install + open 一条龙：
-   ```bash
-   make install        # 需要 sudo（写 /Applications/）
-   make run
-   ```
-6. 重 build 后启动一次，**只**会再弹一次授权对话框；之后任意次重 build、重启都不再失效。
+```bash
+make bootstrap-cert   # 一次性：生成 SimCam Local Dev 证书 + 信任
+make reset-tcc        # 切签身份后清掉旧 TCC 残留
+make install          # 重签 + 拷到 /Applications/（需 sudo）
+make run
+```
+
+**完整推导 / 对比表 / 验证步骤**：[docs/signing-and-tcc.md](docs/signing-and-tcc.md)。**为什么不能删 application-groups、不能换 cdhash 锁定的 DR**：[docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) §2 反转#6 + §4 长期红线。
+
+iOS Simulator 这边的 hook dylib + demo app 不要碰，**继续 ad-hoc**。原因：iOS Simulator 的 dyld 在被测进程是 ad-hoc 时不会接受签了非 ad-hoc cert 的注入 dylib；硬塞反而废掉注入路径。这两个 target 在 .pbxproj 里强制 `CODE_SIGN_IDENTITY = "-"`，**不要**改。
 
 验证：
 
 ```bash
 codesign -dvv /Applications/SimCamApp.app 2>&1 | grep -E 'Authority|Identifier'
-# 期望：Authority=SimCam Local Dev
-#       Identifier=dev.simcam.app
-
-codesign -d --requirements - /Applications/SimCamApp.app 2>&1
-# 期望含：identifier "dev.simcam.app"
-#         and certificate leaf[subject.CN] = "SimCam Local Dev"
+# 期望：Authority=SimCam Local Dev / Identifier=dev.simcam.app
 
 codesign -dvv build/Build/Products/Debug-iphonesimulator/libSimCamHook.dylib 2>&1 | grep -E 'Signature|TeamIdentifier'
 # 期望：Signature=adhoc, TeamIdentifier=not set
@@ -230,3 +209,16 @@ xcrun simctl spawn booted log stream --level debug \
 # 看 sysextd 日志（macOS path）
 sudo log stream --predicate 'process == "sysextd"' --level info
 ```
+
+---
+
+## 12. CMIO 链路？请去看专门的踩坑文档
+
+本笔记只覆盖 iOS Simulator hook 路线。**CMIO（macOS 虚拟摄像头）**那条链路的实现/调试经历完全不一样——它涉及 sysextd / cmiod / OSSystemExtensions / CMSimpleQueue / DR 锁 CN 等一整套 macOS 系统机制，很多坑在 Simulator hook 路线上根本不会出现。
+
+我们把它单独整理成：
+
+- [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) —— 9 次反转 / 5 个关键证据 / 7 条长期红线，**改 CMIO 代码或排查 CMIO 问题前必读**
+- [docs/HANDOFF-2026-06-03.md](docs/HANDOFF-2026-06-03.md) —— 当时调试现场快照 + Codex 给的最终修复（保留作历史归档）
+- [docs/permissions-and-flow.md §2.6](docs/permissions-and-flow.md) —— host → sysext sink stream 的当前架构图与代码索引
+- [docs/no-developer-account.md §2.5](docs/no-developer-account.md) —— macOS 链路常见坑表（`error 8 codeValidationFailed` / `-12773 QueueIsFull` / sink stream 选错）

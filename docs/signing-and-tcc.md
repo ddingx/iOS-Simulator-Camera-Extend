@@ -108,6 +108,10 @@ sudo systemextensionsctl developer on   # 一次性
 make run
 ```
 
+> **关于 SIP**：上面这条路线 SIP 保持完整启用即可——sysextd 之所以接受 self-signed 签名，是因为 `systemextensionsctl developer on` 单独放行了非 Apple anchor 的 system extension，不需要碰 SIP。
+>
+> **唯一需要最小化降级 SIP 的场景**：你想用 lldb / Xcode attach 调试正在运行的 system extension。这时去 Recovery 跑 `csrutil enable --without kext --without debug` 后 reboot 即可（**不是** `csrutil disable`）。详细步骤见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。
+
 `make run` 链路：
 
 1. `xcodebuild -scheme SimCam -configuration Debug` —— host & extension

@@ -47,6 +47,20 @@ echo "==> Stopping any running instance"
 pkill -9 -f SimCamApp 2>/dev/null || true
 sleep 0.3
 
+# Detect zombie sysext entries left over from previous installs.
+# Once `systemextensionsctl uninstall` runs, the old bundle drops to
+# state "[terminated waiting to uninstall on reboot]" and stays there
+# until the machine reboots. They look ugly in `systemextensionsctl
+# list` but empirically do NOT prevent a fresh activation from
+# succeeding (verified on macOS 26 with 25 zombie entries — activation
+# still went through fine once the entitlements were correct). So
+# this is informational only.
+ZOMBIE_COUNT=$(systemextensionsctl list 2>/dev/null | grep -c "dev.simcam.app.extension.*waiting to uninstall on reboot" || true)
+if (( ZOMBIE_COUNT >= 1 )); then
+    echo "ℹ️  Found $ZOMBIE_COUNT pending uninstall-on-reboot entries for dev.simcam.app.extension."
+    echo "   These will only be cleaned by a reboot, but they don't block a fresh activation."
+fi
+
 echo "==> Uninstalling any previously activated SimCamExtension to avoid db.plist zombies"
 # `-` 占位 team id 需要 SIP / developer mode 才能用；失败时静默继续。
 sudo systemextensionsctl uninstall - dev.simcam.app.extension 2>/dev/null || true
@@ -72,6 +86,12 @@ cat > /tmp/simcam_app.entitlements <<'EOF'
     <false/>
     <key>com.apple.developer.system-extension.install</key>
     <true/>
+    <!-- application-groups MUST be present here AND must match the sysext
+         side. Without it, sysextd fails the activation request with
+         "extension category returned error" and the host banner stays at
+         "CMIO extension not activated". This was empirically verified on
+         macOS 26: install once with the key removed → activation fails;
+         restore the key → activation succeeds. -->
     <key>com.apple.security.application-groups</key>
     <array>
         <string>dev.simcam.app</string>

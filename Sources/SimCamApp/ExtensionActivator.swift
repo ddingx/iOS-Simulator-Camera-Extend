@@ -29,8 +29,23 @@ public final class ExtensionActivator: NSObject, ObservableObject, OSSystemExten
 
     private let log = Logger(subsystem: "dev.simcam.app", category: "extension-activator")
     private let bundleID = "dev.simcam.app.extension"
+    private var activationCompletions: [() -> Void] = []
 
-    public func activate() {
+    public func activate(onActivated: (() -> Void)? = nil) {
+        if let onActivated {
+            activationCompletions.append(onActivated)
+        }
+
+        switch status {
+        case .activated:
+            notifyActivationCompletionsAfterProviderWarmup()
+            return
+        case .requesting, .awaitingApproval:
+            return
+        case .idle, .failed:
+            break
+        }
+
         log.info("➡️  Submitting OSSystemExtensionRequest for \(self.bundleID, privacy: .public)")
         status = .requesting
         let request = OSSystemExtensionRequest.activationRequest(
@@ -63,12 +78,27 @@ public final class ExtensionActivator: NSObject, ObservableObject, OSSystemExten
     public func request(_ request: OSSystemExtensionRequest,
                         didFinishWithResult result: OSSystemExtensionRequest.Result) {
         log.info("✅ Extension request finished: \(String(describing: result), privacy: .public)")
-        status = .activated
+        if result == .completed {
+            status = .activated
+            notifyActivationCompletionsAfterProviderWarmup()
+        } else {
+            let message = "System extension activation will complete after reboot."
+            status = .failed(message)
+        }
     }
 
     public func request(_ request: OSSystemExtensionRequest,
                         didFailWithError error: Error) {
         log.error("❌ Extension request failed: \(error.localizedDescription, privacy: .public)")
         status = .failed(error.localizedDescription)
+    }
+
+    private func notifyActivationCompletionsAfterProviderWarmup() {
+        guard !activationCompletions.isEmpty else { return }
+        let completions = activationCompletions
+        activationCompletions.removeAll()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            completions.forEach { $0() }
+        }
     }
 }

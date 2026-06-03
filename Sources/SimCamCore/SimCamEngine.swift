@@ -14,9 +14,12 @@ public final class SimCamEngine {
 
     private let log = OSLog(subsystem: "dev.simcam", category: "engine")
     private let frameSocket = LocalSocketFrameServer()
-    /// host → CMIO Camera Extension 的 Apple 官方推荐通道：sink stream + CMSimpleQueue。
-    /// 见 `CMIOSinkClient.swift` & WWDC22 Session 10022。只 push back 槽位的帧。
-    private let cmioSink = CMIOSinkClient()
+    /// host → CMIO Camera Extension 的帧通道：Apple 官方 sink stream
+    /// 路径（参见 [CMIOSinkClient.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/CMIOSinkClient.swift) 顶部注释）。
+    /// host 用 `AVCaptureDevice.DiscoverySession([.externalUnknown])` 找
+    /// 自家 SimCam Virtual Camera，反查 CMIODeviceID + sink streamID +
+    /// CMSimpleQueue，每帧 `CMSimpleQueueEnqueue`。只 push back 槽位的帧。
+    private let sinkClient = CMIOSinkClient()
     private let stateLock = NSLock()
     private var producers: [CameraSlot: FrameProducer] = [:]
     private var _state = SimCamState()
@@ -28,9 +31,9 @@ public final class SimCamEngine {
         _state.license = license.current
         // LocalSocketFrameServer 只服务 iOS Simulator dylib：
         //   /tmp/com.simcam.frames.sock
-        // CMIO Camera Extension 走 cmioSink（Apple 官方推荐 sink stream 路径）。
+        // CMIO sink 必须等 sysext activation/provider 注册完成后再启动；
+        // AppDelegate 会在 ExtensionActivator completion 里调用 start()。
         frameSocket.start()
-        cmioSink.start()
     }
 
     /// host→simulator 的 unix domain socket 路径，用于 menubar 展示。
@@ -84,6 +87,9 @@ public final class SimCamEngine {
         }
 
         do {
+            if slot == .back {
+                sinkClient.start()
+            }
             let p = try makeProducer(for: source, format: state.format)
             try p.start { [weak self, slot] sample in
                 guard let self = self else { return }
@@ -91,7 +97,7 @@ public final class SimCamEngine {
                 self.frameSocket.push(sample, slot: slot)
                 // 2) CMIO Camera Extension 走 sink stream（仅 back 槽推给虚拟相机）
                 if slot == .back {
-                    self.cmioSink.push(sample)
+                    self.sinkClient.push(sample)
                 }
             }
             producers[slot] = p
@@ -123,6 +129,7 @@ public final class SimCamEngine {
     }
 
     public func start() {
+        sinkClient.start()
         // 1. 先把 UserDefaults 里上次手动选过的覆盖恢复出来（没有的 slot 就走智能默认）
         let backDefault: CameraSource = persistedSource(for: .back) ?? smartDefault(for: .back)
         let frontDefault: CameraSource = persistedSource(for: .front) ?? smartDefault(for: .front)
@@ -201,6 +208,7 @@ public final class SimCamEngine {
     public func stop() {
         for (_, p) in producers { p.stop() }
         producers.removeAll()
+        sinkClient.stop()
         mutate { st in
             st.isBackStreaming = false
             st.isFrontStreaming = false
@@ -234,7 +242,7 @@ public final class SimCamEngine {
         var out: [Diagnostic] = []
         out.append(.init(key: "license", ok: true, detail: license.current.label))
         let installed = SystemExtensionProbe.isSimCamExtensionInstalled()
-        let cmioLive = cmioSink.isConnected
+        let cmioLive = sinkClient.isLive
         // 拆两条：是否安装 + 是否在推帧。
         // 顶部 banner 看 "cmio installed"（绿色稳态），副标题看 "cmio streaming"（升级态）。
         // 这样不会出现"顶部说没装、底部说装了"的精分状态。
@@ -247,7 +255,7 @@ public final class SimCamEngine {
                          ok: installed && cmioLive,
                          detail: installed
                             ? (cmioLive
-                                ? "Pushing frames to a CMIO sink stream"
+                                ? "Pushing frames via CMIO sink stream"
                                 : "Idle — open QuickTime / FaceTime / iOS Simulator and pick \"SimCam Virtual Camera\"")
                             : "—"))
         let hooks = connectedHookCount

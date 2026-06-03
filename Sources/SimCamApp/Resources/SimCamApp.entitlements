@@ -14,6 +14,15 @@
 	  time, but we inject it during re-signing in
 	  scripts/install-systemext.sh, after xcodebuild is done.
 	  See docs/signing-and-tcc.md for the full rationale.
+
+	  IMPORTANT: `application-groups` MUST stay (and must match the
+	  sysext side). Removing it breaks the OSSystemExtensions
+	  host↔sysext ownership contract: sysextd then fails the activation
+	  request with "extension category returned error" (visible in
+	  ExtensionActivator.didFailWithError) and SimCam Virtual Camera
+	  never gets activated. Verified empirically on macOS 26: build
+	  with no application-groups → activation fails; restore the key
+	  on both sides → sysextd resumes accepting the activation.
 	-->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>

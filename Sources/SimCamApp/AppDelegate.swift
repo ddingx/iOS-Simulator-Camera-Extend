@@ -19,11 +19,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureStatusItem()
         configurePopover()
-        // 启动后默认进入 demo 源，让用户立即在模拟器看到效果。
-        SimCamEngine.shared.start()
-        // 触发 .systemextension 激活，让虚拟相机出现在 cmiod / iOS Simulator 里。
+        // 先让 sysext 完成 activation/replacement，再启动会触碰 CMIO 的
+        // engine。否则 host 可能连到正在被替换的旧 sink stream，第一帧入队
+        // 后收不到 alteredProc ack，QuickTime 就一直停在 extension fallback 扫描线。
         if #available(macOS 13.0, *) {
-            ExtensionActivator.shared.activate()
+            ExtensionActivator.shared.activate {
+                SimCamEngine.shared.start()
+            }
+        } else {
+            SimCamEngine.shared.start()
         }
     }
 

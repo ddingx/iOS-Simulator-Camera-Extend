@@ -27,9 +27,10 @@
 │  │ SimCamCore │──┐                                            │
 │  └────────────┘  │                                            │
 │                  │     ┌─────────────────────────┐            │
-│                  ├────▶│ CMIO sink               │── extension─┐
-│                  │     │ (FrameRelay → ext)      │             │
-│                  │     └─────────────────────────┘             │
+│                  ├────▶│ CMIOSinkClient          │── sysext───┐
+│                  │     │ (CMSimpleQueueEnqueue   │            │
+│                  │     │  → consumeSampleBuffer) │            │
+│                  │     └─────────────────────────┘            │
 │                  │                                              │
 │                  │     ┌─────────────────────────┐             │
 │                  └────▶│ LocalSocketFrameServer  │             │
@@ -53,7 +54,7 @@
 └────────────────────────────────────────────────────────────────┘
 ```
 
-- **链路 1 (macOS)**：`SimCamCore` → `FrameRelayServer` → `SimCamCameraExtension` → cmiod/AVF。给 macOS 上所有相机 app 用。
+- **链路 1 (macOS)**：`SimCamCore` → `CMIOSinkClient`（host 端把 CMSampleBuffer push 进 sysext 的 sink stream）→ `SimCamCameraExtension`（CMIO System Extension）→ cmiod/AVFoundation。给 macOS 上所有相机 app（QuickTime、FaceTime、Zoom、Teams、Meet、OBS、Chrome WebRTC …）用。**和 iOS Simulator 无关，可以独立跑。**
 - **链路 2 (iOS Simulator)**：`SimCamCore` → `LocalSocketFrameServer (/tmp/com.simcam.frames.sock)` → `libSimCamHook.dylib`（DYLD_INSERT_LIBRARIES 注入）→ swizzle AVFoundation → 被测 app 看到的就是 host 推过来的画面。**被测 app 0 行业务代码改动。**
 
 ---
@@ -332,6 +333,66 @@ csrutil status
 
 > 历史版本的笔记曾要求 `csrutil enable --without debug --without kext`，那是基于"用 ad-hoc 签 system extension"的旧路线。现在签名升级到 self-signed CA 后这一步**不需要**做。
 
+##### （可选）SIP 最小化降级：`csrutil enable --without kext --without debug`
+
+下面这条**只**在两种场景下需要做，**当前推荐路线（self-signed CA + `systemextensionsctl developer on`）完全用不上**：
+
+- 场景 A：你不想 / 不能用 self-signed CA（比如团队脚本固定走 ad-hoc 签 sysext 的老路）。
+- 场景 B：你想用 Xcode / lldb **attach 调试**正在运行的 system extension（默认 SIP 会拒绝 `task_for_pid` 到非 Apple 签的进程）。
+
+操作（**只关 kext 校验 + 调试器限制，其它 SIP 保护全部保留**）：
+
+```bash
+# 1. 关机
+# 2. 长按电源键，直到看到：
+#    Loading startup options
+# 3. 选择：Options / 选项
+#    进入 Recovery。
+# 4. 菜单里打开：Utilities / 实用工具 → Terminal / 终端
+# 5. 执行：
+csrutil enable --without kext --without debug
+# 6. 然后：
+reboot
+```
+
+回到普通系统验证：
+
+```bash
+csrutil status
+# 期望：
+# System Integrity Protection status: enabled (Custom Configuration).
+#   Apple Internal: disabled
+#   Kext Signing: disabled
+#   Filesystem Protections: enabled
+#   Debugging Restrictions: disabled
+#   DTrace Restrictions: enabled
+#   NVRAM Protections: enabled
+#   BaseSystem Verification: enabled
+#   Boot-arg Restrictions: enabled
+#   Kernel Integrity Protections: enabled
+#   Authenticated Root Requirement: enabled
+```
+
+各开关含义（用 Apple 官方术语）：
+
+| 关掉的开关 | 影响 |
+|---|---|
+| `--without kext` | 允许加载未由 Apple 公证的 kext / 给 sysextd 放行未由 Apple anchor 签的 system extension |
+| `--without debug` | 允许 lldb / Xcode `task_for_pid` attach 到非 Apple 签名进程（用于断点调试 sysext / host） |
+
+恢复完整 SIP（强烈建议平时保持 enabled 状态，仅调试时降级）：
+
+```bash
+# Recovery Terminal
+csrutil clear
+reboot
+# 或者
+csrutil enable
+reboot
+```
+
+> ⚠️ **只在自己的开发机做这个**。SimCam 默认推荐路线是「**SIP 完整启用** + self-signed CA + `systemextensionsctl developer on`」，正常运行 / 安装 / 卸载 / 重签都不需要降级 SIP。本节只为「真的不想用 self-signed CA」或「真的要 attach 调试 sysext」的人保留作为最小化降级方案，避免你看到外网帖子去 `csrutil disable`（那是过度操作）。
+
 #### 2.2.2 启用 system-extension developer mode
 
 ```bash
@@ -414,6 +475,10 @@ make doctor      # = scripts/diagnose-sysext.sh
 | activate 后系统**没弹**任何允许提示 | sysextd 已经记住该 extension 被拒过一次 | `sudo systemextensionsctl reset` + 重启 + `make run` |
 | 重 build 后 TCC 授权失效（系统设置里 ON 但实际 deny） | 你绕过了 `make install` 直接 `xcodebuild build` 跑了 ad-hoc 拷贝 | `make reset-tcc` + `sudo rm -rf /Applications/SimCamApp.app` + `make run` |
 | `cmiod` 看不到 device | extension 进程没被 launch / `startService` 失败 | `log stream --predicate 'process == "SimCamCameraExtension"'` |
+| QuickTime 选了 SimCam Virtual Camera 但只看到 sysext 内置的 demo timer（深灰底 + 移动白线），没看到 host 选的真画面 | host 端 `CMIOSinkClient` 把 source stream 误当 sink stream 在 enqueue（一晚上踩过的坑） | 见 [docs/CMIO-LESSONS-LEARNED.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md) §2 反转#8。修法已在 main：按 stream `name == "SimCam.Sink"` 选 |
+| sysext 日志反复 `enqueue failed: -12773 (kCMSimpleQueueError_QueueIsFull)` | sink stream 的 CMSimpleQueue 被 host 在 cmiod 还没 consume 的时候打满 | `CMIOSinkClient` push 前先 `CMSimpleQueueGetCount`/`GetCapacity` 判一下，遇到队列满就 `resetSinkConnection`（已实现）|
+
+> 改任何 CMIO 相关代码或排查 CMIO 链路前，**先扫一眼** [docs/CMIO-LESSONS-LEARNED.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md)（9 次反转 / 5 个关键证据 / 7 条长期红线）。
 
 ---
 
@@ -421,7 +486,7 @@ make doctor      # = scripts/diagnose-sysext.sh
 
 它们没有冲突，host SimCamCore 同一份 `setSource(...)` 出来的帧会**同时**送到：
 
-- 链路 1：`FrameRelayServer` → CMIO sink → extension → cmiod
+- 链路 1：`CMIOSinkClient.push(sample)` → CMIO sink stream → sysext `consumeSampleBuffer` → cmiod → AVFoundation 客户端
 - 链路 2：`LocalSocketFrameServer` → unix sock → simulator dylib
 
 实测同时打开 QuickTime（选 SimCam Virtual Camera）和 simulator 里的 demo app，两边看到的是同一帧、同一速率。

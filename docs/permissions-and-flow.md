@@ -38,7 +38,9 @@
 │                                       LocalSocketFrameServer     │
 │                                       (/tmp/com.simcam.frames.sock)
 │                                       │                          │
-│                                       ├──► CMIO sysext ──► AVFoundation 宿主
+│                                       ├──► IOSurface + Darwin    │
+│                                       │     notify ──► CMIO sysext
+│                                       │     ──► AVFoundation 宿主│
 │                                       │     "SimCam Virtual Camera"
 │                                       │     (Mac 上任何 AV client 看见)
 │                                       │                          │
@@ -149,6 +151,13 @@
 ```sh
 sudo systemextensionsctl developer on
 ```
+
+**SIP 状态**：默认推荐路线（self-signed CA + `developer on`）下 **SIP 保持完整启用**即可，不需要降级。**两种例外**才需要最小化降级 `csrutil enable --without kext --without debug`（在 Recovery 终端执行后 reboot；其余 SIP 保护全部保留）：
+
+- 想用 lldb / Xcode `task_for_pid` attach 调试正在运行的 system extension；
+- 不想用 self-signed CA、坚持走 ad-hoc 签 sysext 的老路。
+
+正常运行 / 安装 / 卸载 SimCam **都不需要**这步。完整步骤、`csrutil status` 期望输出、恢复方法见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。
 
 详见 [Sources/SimCamApp/ExtensionActivator.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/ExtensionActivator.swift) —— host 端用 `OSSystemExtensionRequest` 走 Apple 官方激活路径；命令行入口是 `make install` + `make run`（自动 build → 重签 → 拷到 `/Applications/` → `chown root:wheel` → open）。
 
@@ -266,10 +275,33 @@ struct SimCamFrameHeader {
 
 ### 2.6 同时，CMIO 系统扩展把帧暴露给 Mac 端 AV 客户端
 
-CMIO sysext (`dev.simcam.app.extension`) 也连同一个 socket，把 host 推过来的帧渲染成一台**真实的 AVCapture 设备**。这样：
+CMIO sysext (`dev.simcam.app.extension`) 把 host 推过来的帧渲染成一台**真实的 AVCapture 设备**。这样：
 
 - iOS 17+ Simulator 系统级别的 *Camera Bridge* 能直接看到 SimCam Virtual Camera（不需要 dylib hook 也行）；
 - QuickTime / Zoom / OBS 等 mac 端 app 也能选 "SimCam Virtual Camera"。
+
+**Host → sysext 帧通道：CMIO sink stream（Apple 官方推荐路径）**
+
+走 Apple WWDC22 + DTS Quinn 推荐的 sink stream：sysext 在 device 上同时
+publish 一个 `direction=.source` 的输出流（给 macOS AVFoundation 客户端）和
+一个 `direction=.sink` 的输入流（接收 host 推过来的帧）。host 把自家
+SimCam Virtual Camera 当 output device 打开，`CMSimpleQueueEnqueue`
+推 CMSampleBuffer，cmiod 自动把每个 buffer 投递到 sysext 的
+`consumeSampleBuffer(from:)` callback。
+
+具体见 [CMIOSinkClient.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/CMIOSinkClient.swift)：
+
+1. host 端 [SimCamEngine](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/SimCamEngine.swift) 拿到 back-camera 帧后，调用 `CMIOSinkClient.push(sample)`；
+2. CMIOSinkClient 用 `AVCaptureDevice.DiscoverySession([.externalUnknown])` enumerate 自家 SimCam Virtual Camera，按 uniqueID 反查 `CMIODeviceID`；
+3. 在 device 上枚举 streams，**优先按 stream `kCMIOStreamPropertyName == "SimCam.Sink"` 匹配**（sysext 端 [SimCamCMIODevice.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamExtension/SimCamCMIODevice.swift) 给 sink stream 起的固定名字）；如果取不到 name，再按 sysext 端的 `addStream(source) → addStream(sink)` 注册顺序退化成"取索引 1"；只把 `kCMIOStreamPropertyDirection` 当最后兜底，**不再单独依赖它来选 sink**（一晚上调试反复在这里被 direction 语义反转坑过，详见 [docs/CMIO-LESSONS-LEARNED.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md) §2 反转#8）；
+4. `CMIOStreamCopyBufferQueue(streamID, …)` 拿 sink stream 的 `CMSimpleQueue`，push 前先 `CMSimpleQueueGetCount` / `GetCapacity` 判一下有没有满；遇到 `-12773 / kCMSimpleQueueError_QueueIsFull` 立即 `resetSinkConnection`，避免一帧打满后死锁；
+5. sysext 端 [SimCamCMIOSinkSource.startStream](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamExtension/SimCamCMIODevice.swift) 订阅 `stream.consumeSampleBuffer(from: client)` —— host 每 enqueue 一帧，cmiod 就回调一次 → 把 sample buffer 转给 source stream 的 `handleRealSampleBuffer` → `stream.send(sample)` → AVFoundation 客户端；
+6. sysext 端首帧真实帧到达前/到达后无真帧时，60fps demo timer 喂"深灰底 + 移动白线"做 fallback，肉眼能区分"通道未连"和"真实帧已喂"。
+
+实战参考：[fuziki/CameraEX](https://github.com/fuziki/CameraEX) 同 app bundle host + sysext sink stream 完整可工作实现。
+
+> 改这一段的代码或说明前，**先读** [docs/CMIO-LESSONS-LEARNED.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md)。
+> 那里把"为什么不能凭 `direction` 选 sink"、"为什么删 application-groups 必报 codeValidationFailed"、"为什么 ad-hoc 签名 TCC 会失忆"等踩过的反转写成长期红线。
 
 ### 2.7 关闭
 
