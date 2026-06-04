@@ -96,17 +96,17 @@ codesign -dvv build/Build/Products/Debug-iphonesimulator/libSimCamHook.dylib 2>&
 
 **根因**：hook 里我们用 `class_createInstance(NSClassFromString(@"AVCaptureVideoPreviewLayer"), 0)` 绕过了 AVF 的私有 init，但这个类的 `setBounds:` / `setFrame:` / `layoutSublayers` / `display` 都依赖 init 时设置的私有 ivars，导致 deref 0x0。
 
-**修法**：把这些方法 swizzle 成转发到 `CALayer` 的实现：
+**修法**：把这些方法的 IMP 强制替换为 `CALayer` 的对应实现：
 
 ```objc
-// SimCamHook.m
-class_replaceMethod(cls, @selector(setBounds:),
-    class_getMethodImplementation([CALayer class], @selector(setBounds:)),
-    "v@:{CGRect={CGPoint=dd}{CGSize=dd}}");
+// SimCamHook.m — 节选自 simcam_install_swizzles 中 PreviewLayer 段
+Method m = class_getInstanceMethod(cls, @selector(setBounds:));
+IMP   ca = class_getMethodImplementation([CALayer class], @selector(setBounds:));
+method_setImplementation(m, ca);
 // 同理 setFrame:, layoutSublayers, display
 ```
 
-详见 [`SimCamHook.m`](Sources/SimCamHook/SimCamHook.m) 的 `simcam_install_preview_layer_overrides`。
+详见 [SimCamHook.m](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamHook/SimCamHook.m) 中 `simcam_install_swizzles` 的 PreviewLayer 段（搜索 `AVCaptureVideoPreviewLayer`）。
 
 ---
 

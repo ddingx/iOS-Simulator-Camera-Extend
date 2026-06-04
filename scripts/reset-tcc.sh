@@ -63,8 +63,8 @@ Done.
 
 Now rebuild and launch SimCamApp from the build products dir or from
 /Applications. macOS will prompt for permissions ONCE; the grants will be
-keyed off your Personal Team's designated requirement, so subsequent rebuilds
-keep the permission.
+keyed off the "SimCam Local Dev" self-signed CA's designated requirement
+(cert CN, not cdhash), so subsequent rebuilds keep the permission.
 
   $ make build && make run
 EOF
