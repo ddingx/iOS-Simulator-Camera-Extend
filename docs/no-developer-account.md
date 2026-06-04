@@ -444,9 +444,10 @@ make install                              # 等价于 make build + scripts/insta
 make run                                  # = make install + open /Applications/SimCamApp.app
 #    或者：open /Applications/SimCamApp.app
 
-# 3. 在 menubar popover 里点 "Activate Extension"
-#    第一次会触发 系统设置 → Privacy & Security → 允许扩展 的对话框
+# 3. 启动 SimCamApp 时会自动调 ExtensionActivator.shared.activate()
+#    第一次激活会触发 系统设置 → Privacy & Security → 允许扩展 的对话框
 #    点 Allow，extension 会进入 [activated enabled]
+#    （popover 里没有手动激活按钮 —— 走 AppDelegate.applicationDidFinishLaunching）
 
 # 4. 验证
 systemextensionsctl list | grep simcam

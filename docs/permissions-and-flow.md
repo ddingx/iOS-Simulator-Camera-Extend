@@ -29,33 +29,47 @@
 宏观图：
 
 ```
-┌──────────────────────────  macOS host  ──────────────────────────┐
-│                                                                  │
-│  [Mac Camera] ─┐                                                 │
-│  [Screen]     ─┼─► FrameProducer ─► SimCamEngine ─► Encoder ──┐  │
-│  [Demo built-in]─┘                                            │  │
-│                                                               ▼  │
-│                                       LocalSocketFrameServer     │
-│                                       (/tmp/com.simcam.frames.sock)
-│                                       │                          │
-│                                       ├──► IOSurface + Darwin    │
-│                                       │     notify ──► CMIO sysext
-│                                       │     ──► AVFoundation 宿主│
-│                                       │     "SimCam Virtual Camera"
-│                                       │     (Mac 上任何 AV client 看见)
-│                                       │                          │
-│                                       └──► Unix socket ──► iOS Sim
-│                                                              │   │
-│                                                              ▼   │
-│                                       libSimCamHook.dylib (DYLD_INSERT_LIBRARIES)
-│                                       │                          │
-│                                       │ swizzle AVCaptureDevice  │
-│                                       │ / AVCaptureSession       │
-│                                       │ / AVPreviewLayer         │
-│                                       ▼                          │
-│                                       被测 iOS app 的 AVFoundation
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────  macOS host (SimCamApp)  ──────────────────────────┐
+│                                                                              │
+│  [Mac Camera] ─┐                                                             │
+│  [Screen]     ─┼─► FrameProducer ─► SimCamEngine ─► CMSampleBuffer ─────┐    │
+│  [Window]     ─┤                            │                           │    │
+│  [Image/Video]─┤                            │                           │    │
+│  [QR]         ─┤                            │                           │    │
+│  [Demo card]  ─┘                            │                           │    │
+│                                             │                           │    │
+│                                             ├──► CMIOSinkClient         │    │
+│                                             │    CMSimpleQueueEnqueue   │    │
+│                                             │    │                      │    │
+│                                             │    ▼                      │    │
+│                                             │  CMIO sink stream         │    │
+│                                             │  "SimCam.Sink" (cmiod)    │    │
+│                                             │    │                      │    │
+│                                             │    ▼                      │    │
+│                                             │  SimCamExtension.systemextension
+│                                             │  consumeSampleBuffer ─► source stream
+│                                             │    │                      │    │
+│                                             │    ▼                      │    │
+│                                             │  AVFoundation 任意 mac 客户端 │
+│                                             │  "SimCam Virtual Camera"  │    │
+│                                             │  (QuickTime / FaceTime /  │    │
+│                                             │   Zoom / OBS / WebRTC ...)│    │
+│                                             │                           │    │
+│                                             └──► LocalSocketFrameServer │    │
+│                                                  /tmp/com.simcam.frames.sock │
+│                                                  │                      │    │
+└──────────────────────────────────────────────────┼──────────────────────┼────┘
+                                                   │ unix socket           │
+                                                   ▼                       │
+┌──────────────────────────  iOS Simulator (booted)  ──────────────────────────┐
+│  libSimCamHook.dylib (DYLD_INSERT_LIBRARIES)                                 │
+│  swizzle: AVCaptureDevice / AVCaptureSession / AVCaptureVideoPreviewLayer    │
+│  ▼                                                                           │
+│  被测 iOS app 的 AVFoundation —— 业务代码 0 行改动                           │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+> CMIO 链路走的是 **官方 sink stream + `CMSimpleQueueEnqueue`**（详见 §2.6）。**不是** IOSurface + Darwin notify 桥（那是早期试错方案，已被废弃，参见 [docs/CMIO-LESSONS-LEARNED.md §4 红线 #3](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md#L143)）。
 
 ---
 
@@ -197,9 +211,14 @@ make run                       # = build + open SimCamApp.app
 ### 2.2 启动 simulator + 安装 demo
 
 ```sh
-make demo-build                # build SimCamDemoApp.app for iOS Simulator
+# build SimCamDemoApp.app for iOS Simulator
+xcodebuild -project SimCam.xcodeproj -scheme SimCamDemo \
+    -configuration Debug \
+    -destination 'generic/platform=iOS Simulator' build
+
 xcrun simctl boot <udid>       # 或者 Xcode 里直接打开 simulator
-xcrun simctl install booted build/.../SimCamDemoApp.app
+xcrun simctl install booted \
+    ~/Library/Developer/Xcode/DerivedData/SimCam-*/Build/Products/Debug-iphonesimulator/SimCamDemoApp.app
 ```
 
 ### 2.3 注入 hook 到被测 app

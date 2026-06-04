@@ -123,9 +123,11 @@ make run
    extension（确保 `com.apple.developer.system-extension.install`、
    sandbox=true on extension、application-groups 这些 entitlements 真
    的写进 codesign blob，不被 Xcode 偷掉）。
-3. `open /Applications/SimCamApp.app` —— menubar 出现，点击 *Activate
-   Virtual Camera*，sysextd 接受激活，`systemextensionsctl list` 看到
-   `[activated enabled]`。
+3. `open /Applications/SimCamApp.app` —— menubar 出现，
+   `AppDelegate.applicationDidFinishLaunching` 自动调
+   `ExtensionActivator.shared.activate()`；首次激活时去
+   *系统设置 → Privacy & Security* 点 *允许*，sysextd 接受激活后
+   `systemextensionsctl list` 看到 `[activated enabled]`。
 
 ### 3.3 后续开发
 
