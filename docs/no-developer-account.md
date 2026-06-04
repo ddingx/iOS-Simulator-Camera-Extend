@@ -72,7 +72,7 @@ SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=/path/to/libSimCamHook.dylib \
   xcrun simctl launch --terminate-running-process booted dev.simcam.demo
 ```
 
-我们的 [scripts/inject-simulator.sh](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/inject-simulator.sh) 就是把这条命令包了一下。
+我们的 [scripts/inject-simulator.sh](scripts/inject-simulator.sh) 就是把这条命令包了一下。
 
 ### 1.2 端到端步骤
 
@@ -209,17 +209,17 @@ SimCamEngine.shared.stop(slot: .front)
 
 #### 桌面捕获
 
-源类型 [`.screen(displayID:windowID:includeMouse:)`](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/CameraSource.swift#L21) 走 [ScreenFrameProducer](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/FrameProducers.swift#L364)：
+源类型 [`.screen(displayID:windowID:includeMouse:)`](Sources/SimCamCore/CameraSource.swift#L21) 走 [ScreenFrameProducer](Sources/SimCamCore/FrameProducers.swift#L364)：
 
 - 用 `SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)` 列举可选；
 - `windowID != 0` 时构造 `SCContentFilter(desktopIndependentWindow:)`，否则锁定 display；
 - `SCStreamConfiguration` 取 host 当前 `FrameFormat`（`width/height/fps`）；
 - `SCStreamOutput` 校验 `SCStreamFrameInfo.status == .complete` 才转发；
-- **首次 `start()` 会触发系统的「屏幕录制权限」弹窗**——授权后第二次启动即可正常出帧。SimCamApp 自身（自指）窗口在 [ScreenSourceDiscovery.list()](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/FrameProducers.swift#L327) 里被 `processIdentifier` 过滤掉，避免 cycle。
+- **首次 `start()` 会触发系统的「屏幕录制权限」弹窗**——授权后第二次启动即可正常出帧。SimCamApp 自身（自指）窗口在 [ScreenSourceDiscovery.list()](Sources/SimCamCore/FrameProducers.swift#L327) 里被 `processIdentifier` 过滤掉，避免 cycle。
 
 #### hook 侧 slot 路由
 
-[SimCamHook.m](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamHook/SimCamHook.m) 在收到 v2 header 后：
+[SimCamHook.m](Sources/SimCamHook/SimCamHook.m) 在收到 v2 header 后：
 
 1. `gLatestPixelBuffer[slot]` / `gLatestQRPayload[slot]` 分桶缓存；
 2. `simcam_session_slot(AVCaptureSession*)` 通过 `session.inputs[0].device.position` 反查归属 slot（`addInput:` 时也把 session 关联到 input/output 上）；
@@ -244,9 +244,9 @@ session.addInput(input)
 
 #### menubar UI
 
-[MenubarView.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/MenubarView.swift) 现在是两栏并列 picker（`BACK CAMERA SOURCE` / `FRONT CAMERA SOURCE`），分别独立选择 None / Demo / 任意真实摄像头 / Image / Video / QR / 任意 display 或 window。每栏右侧绿点指示该路是否在 streaming，且各自有独立的 `Stop back` / `Stop front` 按钮。
+[MenubarView.swift](Sources/SimCamApp/MenubarView.swift) 现在是两栏并列 picker（`BACK CAMERA SOURCE` / `FRONT CAMERA SOURCE`），分别独立选择 None / Demo / 任意真实摄像头 / Image / Video / QR / 任意 display 或 window。每栏右侧绿点指示该路是否在 streaming，且各自有独立的 `Stop back` / `Stop front` 按钮。
 
-真实摄像头按 `CameraDescriptor.kind`（[CameraKind](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/SimCamState.swift#L66) = builtIn / external / continuity / deskView / front / simcamVirtual）显示真实标签——不再像 v1 那样把所有 mac 摄像头统一打成 `back`（macOS 上 `device.position` 永远是 unspecified，所以旧 UI 完全没意义）。SimCam 自家虚拟相机默认从列表里过滤掉（避免被自己挑成源造成 cycle），这是 [CameraDiscovery.list(includeSimCamVirtual:)](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/FrameProducers.swift) 的 `false` 默认值控制的。
+真实摄像头按 `CameraDescriptor.kind`（[CameraKind](Sources/SimCamCore/SimCamState.swift#L66) = builtIn / external / continuity / deskView / front / simcamVirtual）显示真实标签——不再像 v1 那样把所有 mac 摄像头统一打成 `back`（macOS 上 `device.position` 永远是 unspecified，所以旧 UI 完全没意义）。SimCam 自家虚拟相机默认从列表里过滤掉（避免被自己挑成源造成 cycle），这是 [CameraDiscovery.list(includeSimCamVirtual:)](Sources/SimCamCore/FrameProducers.swift) 的 `false` 默认值控制的。
 
 ### 1.5 hook 内部做了什么（只要你想自己拓展功能就要看）
 
@@ -318,7 +318,7 @@ ad-hoc（`codesign -s -`）和 Apple Development（Personal Team 免费签）都
 - **ad-hoc**：能装上 system extension，但 TCC 用 cdhash 锁 designated requirement，每次 rebuild cdhash 一变，Camera / Screen Recording / Microphone 授权全部失效；
 - **Personal Team 免费签**：Apple 不给 Personal Team 颁 System Extension capability，profile 申请直接报 *"Personal development teams ... do not support the System Extension capability"*。
 
-所以本仓库选了第三条：本地 self-signed CA + `systemextensionsctl developer on`。原理 / 取舍 / 替代方案对比见 [docs/signing-and-tcc.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/signing-and-tcc.md)。
+所以本仓库选了第三条：本地 self-signed CA + `systemextensionsctl developer on`。原理 / 取舍 / 替代方案对比见 [docs/signing-and-tcc.md](docs/signing-and-tcc.md)。
 
 ### 2.2 必须的前置环境
 
@@ -404,7 +404,7 @@ sudo systemextensionsctl developer on
 make bootstrap-cert
 ```
 
-这条命令（[scripts/bootstrap-cert.sh](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/bootstrap-cert.sh)）会：
+这条命令（[scripts/bootstrap-cert.sh](scripts/bootstrap-cert.sh)）会：
 
 1. 在你的 `login.keychain-db` 里生成一对 ECC P-256 key；
 2. 自签一张证书，CN = `SimCam Local Dev`，EKU = codeSigning；
@@ -423,7 +423,7 @@ security find-identity -v -p codesigning | grep "SimCam Local Dev"
 
 `SimCamApp.app` 必须从 `/Applications/SimCamApp.app` 启动；DerivedData 路径下的 app 跑 `OSSystemExtensionManager` 时会被 sysextd 拒绝（理由：路径不在受信任位置）。host app 还必须 `chown root:wheel`。
 
-仓库提供的 [scripts/install-systemext.sh](file:///Users/guoshuyu/workspace/swmansion-copy/scripts/install-systemext.sh) 把这套约束都封装好了：build 完之后**重签**一遍（确保 host + extension + 内部 dylib 全部用 `SimCam Local Dev` 签且 designated requirement 锁到 CN）→ 拷到 `/Applications/` → `chown root:wheel`。直接 `make install` 调它即可。
+仓库提供的 [scripts/install-systemext.sh](scripts/install-systemext.sh) 把这套约束都封装好了：build 完之后**重签**一遍（确保 host + extension + 内部 dylib 全部用 `SimCam Local Dev` 签且 designated requirement 锁到 CN）→ 拷到 `/Applications/` → `chown root:wheel`。直接 `make install` 调它即可。
 
 ### 2.4 端到端步骤
 
@@ -471,10 +471,10 @@ make doctor      # = scripts/diagnose-sysext.sh
 | activate 后系统**没弹**任何允许提示 | sysextd 已经记住该 extension 被拒过一次 | `sudo systemextensionsctl reset` + 重启 + `make run` |
 | 重 build 后 TCC 授权失效（系统设置里 ON 但实际 deny） | 你绕过了 `make install` 直接 `xcodebuild build` 跑了 ad-hoc 拷贝 | `make reset-tcc` + `sudo rm -rf /Applications/SimCamApp.app` + `make run` |
 | `cmiod` 看不到 device | extension 进程没被 launch / `startService` 失败 | `log stream --predicate 'process == "SimCamCameraExtension"'` |
-| QuickTime 选了 SimCam Virtual Camera 但只看到 sysext 内置的 demo timer（深灰底 + 移动白线），没看到 host 选的真画面 | host 端 `CMIOSinkClient` 把 source stream 误当 sink stream 在 enqueue（一晚上踩过的坑） | 见 [docs/CMIO-LESSONS-LEARNED.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md) §2 反转#8。修法已在 main：按 stream `name == "SimCam.Sink"` 选 |
+| QuickTime 选了 SimCam Virtual Camera 但只看到 sysext 内置的 demo timer（深灰底 + 移动白线），没看到 host 选的真画面 | host 端 `CMIOSinkClient` 把 source stream 误当 sink stream 在 enqueue（一晚上踩过的坑） | 见 [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) §2 反转#8。修法已在 main：按 stream `name == "SimCam.Sink"` 选 |
 | sysext 日志反复 `enqueue failed: -12773 (kCMSimpleQueueError_QueueIsFull)` | sink stream 的 CMSimpleQueue 被 host 在 cmiod 还没 consume 的时候打满 | `CMIOSinkClient` push 前先 `CMSimpleQueueGetCount`/`GetCapacity` 判一下，遇到队列满就 `resetSinkConnection`（已实现）|
 
-> 改任何 CMIO 相关代码或排查 CMIO 链路前，**先扫一眼** [docs/CMIO-LESSONS-LEARNED.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md)（9 次反转 / 5 个关键证据 / 7 条长期红线）。
+> 改任何 CMIO 相关代码或排查 CMIO 链路前，**先扫一眼** [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md)（9 次反转 / 5 个关键证据 / 7 条长期红线）。
 
 ### 2.6 如果有 Apple Developer Program 付费账号
 
@@ -486,9 +486,9 @@ make doctor      # = scripts/diagnose-sysext.sh
 
 #### 2.6.1 一次性配置
 
-1. **在 [Apple Developer Account](https://developer.apple.com/account) 申请 System Extension capability**：Identifiers → 创建新 App ID `dev.simcam.host`（host）和 `dev.simcam.host.Extension`（extension），都勾选 **System Extension**。Apple 通常自动批准，CMIO 这种通用类不需要单独申请审查（不像 Endpoint Security / DriverKit family 需要专门 entitlement）。
+1. **在 [Apple Developer Account](https://developer.apple.com/account) 申请 System Extension capability**：Identifiers → 沿用现有 bundle id `dev.simcam.app`（host）和 `dev.simcam.app.extension`（extension）注册 App ID（如果想换名字也可以另起，但要同步改 [SimCam.xcodeproj/project.pbxproj](SimCam.xcodeproj/project.pbxproj) 里所有 `PRODUCT_BUNDLE_IDENTIFIER` 与 [SystemExtensionProbe.swift](Sources/SimCamCore/SystemExtensionProbe.swift)、[ExtensionActivator.swift](Sources/SimCamApp/ExtensionActivator.swift)、[MenubarViewModel.swift](Sources/SimCamApp/MenubarViewModel.swift) 中的硬编码字符串），两个 App ID 都勾选 **System Extension**。Apple 通常自动批准，CMIO 这种通用类不需要单独申请审查（不像 Endpoint Security / DriverKit family 需要专门 entitlement）。
 2. **下载 / 创建 Developer ID Application 证书**：Xcode → Settings → Accounts → 选你的 Team → Manage Certificates → `+` → Developer ID Application。私钥留在 keychain。
-3. **替换签名身份**：编辑 [Configs/SimCamSigning.local.xcconfig](file:///Users/guoshuyu/workspace/swmansion-copy/Configs/SimCamSigning.local.xcconfig)（不入仓）：
+3. **替换签名身份**：编辑 [Configs/SimCamSigning.local.xcconfig](Configs/SimCamSigning.local.xcconfig)（不入仓）：
 
    ```
    CODE_SIGN_STYLE = Manual
@@ -524,7 +524,7 @@ make install                            # 重签 + 拷贝（脚本内部已识�
 make run
 ```
 
-成功标志：[ExtensionActivator.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/ExtensionActivator.swift) 的 `OSSystemExtensionRequest didFinishWithResult: completed`，sysextd 日志 `validated requirements`，`csrutil status` 仍然是 `enabled`。
+成功标志：[ExtensionActivator.swift](Sources/SimCamApp/ExtensionActivator.swift) 的 `OSSystemExtensionRequest didFinishWithResult: completed`，sysextd 日志 `validated requirements`，`csrutil status` 仍然是 `enabled`。
 
 #### 2.6.4 取舍
 
@@ -550,7 +550,7 @@ make run
 
 实测同时打开 QuickTime（选 SimCam Virtual Camera）和 simulator 里的 demo app，两边看到的是同一帧、同一速率。
 
-Menubar popover 里 [MenubarView.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/MenubarView.swift) 显示两条 banner：
+Menubar popover 里 [MenubarView.swift](Sources/SimCamApp/MenubarView.swift) 显示两条 banner：
 
 ```
 CMIO ext: registered           1920×1080 / 30fps

@@ -106,7 +106,7 @@ method_setImplementation(m, ca);
 // 同理 setFrame:, layoutSublayers, display
 ```
 
-详见 [SimCamHook.m](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamHook/SimCamHook.m) 中 `simcam_install_swizzles` 的 PreviewLayer 段（搜索 `AVCaptureVideoPreviewLayer`）。
+详见 [SimCamHook.m](Sources/SimCamHook/SimCamHook.m) 中 `simcam_install_swizzles` 的 PreviewLayer 段（搜索 `AVCaptureVideoPreviewLayer`）。
 
 ---
 

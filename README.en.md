@@ -28,7 +28,7 @@ The app under test stays on **stock AVFoundation** — `AVCaptureDevice` / `AVCa
 
 Built on public Apple APIs only (`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`) plus `DYLD_INSERT_LIBRARIES` on the Simulator side. **No private SPI, no jailbreak.**
 
-> The CMIO sysext path needs a one-time minimal SIP relaxation: `csrutil enable --without kext --without debug`. Every other SIP protection (fs / nvram / dtrace) stays on; the Simulator hook path is fully user-space and SIP-agnostic. See [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md). **Have a paid Apple Developer Program?** Use the Developer ID + Notarize route — SIP stays fully on, no `developer on` needed; see [§2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479).
+> The CMIO sysext path needs a one-time minimal SIP relaxation: `csrutil enable --without kext --without debug`. Every other SIP protection (fs / nvram / dtrace) stays on; the Simulator hook path is fully user-space and SIP-agnostic. See [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md). **Have a paid Apple Developer Program?** Use the Developer ID + Notarize route — SIP stays fully on, no `developer on` needed; see [§2.6](docs/no-developer-account.md#L479).
 
 ---
 
@@ -88,7 +88,7 @@ flowchart LR
     class eng shared;
 ```
 
-> One frame source (`SimCamEngine`) fans out to two pipelines: the CMIO sysext exposes *SimCam Virtual Camera* to **every** macOS camera app; the DYLD hook lets the iOS app under test inside the Simulator see the host frames with zero source changes. Both pipelines share the same [SimCamCore](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore).
+> One frame source (`SimCamEngine`) fans out to two pipelines: the CMIO sysext exposes *SimCam Virtual Camera* to **every** macOS camera app; the DYLD hook lets the iOS app under test inside the Simulator see the host frames with zero source changes. Both pipelines share the same [SimCamCore](Sources/SimCamCore).
 
 The wire protocol (48-byte v2 header with `cameraSlot`) is in [SimCamHook.h](Sources/SimCamHook/SimCamHook.h).
 
@@ -118,7 +118,7 @@ The wire protocol (48-byte v2 header with `cameraSlot`) is in [SimCamHook.h](Sou
 
 ### Bring up the CMIO pipeline (4 commands)
 
-You'll need: write access to `/Applications/` (sudo) + the `SimCam Local Dev` cert (`make bootstrap-cert`, one-shot) + `developer on` (resets on reboot) + a one-time minimal SIP relaxation (see [Requirements](#requirements)). **Have a paid Team account?** The Developer ID + Notarize route keeps SIP fully on and skips `developer on` — see [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479).
+You'll need: write access to `/Applications/` (sudo) + the `SimCam Local Dev` cert (`make bootstrap-cert`, one-shot) + `developer on` (resets on reboot) + a one-time minimal SIP relaxation (see [Requirements](#requirements)). **Have a paid Team account?** The Developer ID + Notarize route keeps SIP fully on and skips `developer on` — see [docs/no-developer-account.md §2.6](docs/no-developer-account.md#L479).
 
 ```bash
 # One-time setup (per machine)
@@ -167,12 +167,12 @@ When something's off: run `make doctor` first, then read [docs/permissions-and-f
 
 | Item | Notes |
 |---|---|
-| **One-time minimal SIP relaxation** | `csrutil enable --without kext --without debug` (run from Recovery Terminal then reboot; every other SIP protection — fs / nvram / dtrace — stays on). This is the prerequisite for `developer on` to accept non-Apple-anchored signatures; Apple's HIDDriverKit sample also says "Disable SIP" first. See [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md) |
+| **One-time minimal SIP relaxation** | `csrutil enable --without kext --without debug` (run from Recovery Terminal then reboot; every other SIP protection — fs / nvram / dtrace — stays on). This is the prerequisite for `developer on` to accept non-Apple-anchored signatures; Apple's HIDDriverKit sample also says "Disable SIP" first. See [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md) |
 | **System-extension developer mode** | `sudo systemextensionsctl developer on` (resets on reboot, re-run after every restart) |
 | **sudo access** | Installing a sysext requires copying the host bundle to `/Applications/` and `chown root:wheel` (sysextd's hard rule) |
 | **Local self-signed cert: SimCam Local Dev** | One-shot `make bootstrap-cert`, generated and imported into login keychain; the private key is **never** committed |
 
-> **Have a paid Apple Developer Program?** Use Developer ID Application + System Extension capability + notarize instead — the sysext rides the Apple anchor, SIP can stay fully enabled, no `developer on` needed. See [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479).
+> **Have a paid Apple Developer Program?** Use Developer ID Application + System Extension capability + notarize instead — the sysext rides the Apple anchor, SIP can stay fully enabled, no `developer on` needed. See [docs/no-developer-account.md §2.6](docs/no-developer-account.md#L479).
 
 ### Not required
 

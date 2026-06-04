@@ -76,7 +76,7 @@ System Extension 的激活路径有三个独立校验门：
   不友好。
 * Personal Team 不支持 System Extension capability —— 见今天 Xcode
   截图 *"Cannot create a Mac App Development provisioning profile for
-  'dev.simcam.app'. Personal development teams, including 'Asher Guo',
+  'dev.simcam.app'. Personal development teams, including '<your team>',
   do not support the System Extension capability."*
 
 如果未来真要做正式发行版，应当切到 Developer ID + notarization；但开
@@ -110,7 +110,7 @@ make run
 
 > **关于 SIP**：上面这条路线**必须做一次最小化降级** `csrutil enable --without kext --without debug`（Recovery 终端执行后 reboot），其它 SIP 保护（fs / nvram / dtrace）全部保留。原因：`systemextensionsctl developer on` 在 SIP 完整启用下会被拒绝；Apple HIDDriverKit 官方 sample 第 1 步即为 "Disable SIP"，**这是开启开发者模式的前提，不是可选项**。
 >
-> **唯一能跑在 SIP 完整启用下的路线**：拥有 Apple Developer Program 付费账号 + Developer ID Application 证书 + System Extension capability + notarize。这时 sysext 走 Apple anchor trust chain，既不需要 `developer on`，也不需要 SIP 降级。详见 [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md) "如果有 Apple Developer Program 付费账号"。详细 SIP 操作步骤见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。
+> **唯一能跑在 SIP 完整启用下的路线**：拥有 Apple Developer Program 付费账号 + Developer ID Application 证书 + System Extension capability + notarize。这时 sysext 走 Apple anchor trust chain，既不需要 `developer on`，也不需要 SIP 降级。详见 [docs/no-developer-account.md §2.6](docs/no-developer-account.md) "如果有 Apple Developer Program 付费账号"。详细 SIP 操作步骤见 [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md)。
 
 `make run` 链路：
 

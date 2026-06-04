@@ -28,7 +28,7 @@ iOS Simulator 没有相机。一旦你的 app 涉及 `AVCaptureSession`、扫码
 
 仅依赖 Apple 公开 API（`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`）+ iOS Simulator 上的 `DYLD_INSERT_LIBRARIES`。**没有私有 SPI，不越狱**。
 
-> CMIO sysext 链路需要一次性最小化降级 SIP：`csrutil enable --without kext --without debug`。其它 SIP 保护（fs / nvram / dtrace）保留；Simulator hook 链路完全用户态、无关 SIP。详见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。**有付费 Apple Developer Program？** 可走 Developer ID + Notarize 路线，SIP 完整启用、不需 `developer on`，详见 [§2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479)。
+> CMIO sysext 链路需要一次性最小化降级 SIP：`csrutil enable --without kext --without debug`。其它 SIP 保护（fs / nvram / dtrace）保留；Simulator hook 链路完全用户态、无关 SIP。详见 [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md)。**有付费 Apple Developer Program？** 可走 Developer ID + Notarize 路线，SIP 完整启用、不需 `developer on`，详见 [§2.6](docs/no-developer-account.md#L479)。
 
 ---
 
@@ -88,7 +88,7 @@ flowchart LR
     class eng shared;
 ```
 
-> 一份帧源（`SimCamEngine`）同时投到两条链路：CMIO sysext 让 macOS 上**任何**相机 app 看到 SimCam Virtual Camera；DYLD hook 让 iOS Simulator 里被测 app 拿到 host 推过来的画面（业务代码不改）。两条链路共享同一份 [SimCamCore](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore)。
+> 一份帧源（`SimCamEngine`）同时投到两条链路：CMIO sysext 让 macOS 上**任何**相机 app 看到 SimCam Virtual Camera；DYLD hook 让 iOS Simulator 里被测 app 拿到 host 推过来的画面（业务代码不改）。两条链路共享同一份 [SimCamCore](Sources/SimCamCore)。
 
 帧线协议（48 字节 v2 头 + `cameraSlot`）见 [SimCamHook.h](Sources/SimCamHook/SimCamHook.h)。
 
@@ -118,7 +118,7 @@ flowchart LR
 
 ### 跑通 CMIO 链路（4 条命令）
 
-需要：`/Applications/` 写权限（sudo）+ `SimCam Local Dev` 证书（`make bootstrap-cert` 一次生成）+ `developer on`（重启失效）+ 一次性 SIP 最小化降级（详见 [§环境准备](#环境准备)）。**有付费 Team 账号？** Developer ID + Notarize 路线可保 SIP 完整启用、不需 `developer on`，详见 [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479)。
+需要：`/Applications/` 写权限（sudo）+ `SimCam Local Dev` 证书（`make bootstrap-cert` 一次生成）+ `developer on`（重启失效）+ 一次性 SIP 最小化降级（详见 [§环境准备](#环境准备)）。**有付费 Team 账号？** Developer ID + Notarize 路线可保 SIP 完整启用、不需 `developer on`，详见 [docs/no-developer-account.md §2.6](docs/no-developer-account.md#L479)。
 
 ```bash
 # 一次性 setup（每台机器一次）
@@ -167,12 +167,12 @@ system_profiler SPCameraDataType | grep -A2 SimCam
 
 | 项 | 说明 |
 |---|---|
-| **一次性 SIP 最小化降级** | `csrutil enable --without kext --without debug`（Recovery 终端执行后 reboot；其余 SIP 保护 fs / nvram / dtrace 全部保留）。这是 `developer on` 接受非 Apple anchor 签名的前提；Apple HIDDriverKit 官方 sample 也是先关 SIP 再开 dev mode。详见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md) |
+| **一次性 SIP 最小化降级** | `csrutil enable --without kext --without debug`（Recovery 终端执行后 reboot；其余 SIP 保护 fs / nvram / dtrace 全部保留）。这是 `developer on` 接受非 Apple anchor 签名的前提；Apple HIDDriverKit 官方 sample 也是先关 SIP 再开 dev mode。详见 [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md) |
 | **SIP developer mode** | `sudo systemextensionsctl developer on`（重启失效，每次开机要重开一次） |
 | **sudo 权限** | 装 sysext 必须把 host bundle 拷到 `/Applications/` 并 `chown root:wheel`（sysextd 的硬约束） |
 | **本地自签名证书 SimCam Local Dev** | 一次性，`make bootstrap-cert` 生成并导入 keychain；私钥不入仓 |
 
-> **有 Apple Developer Program 付费账号？** 改用 Developer ID Application + System Extension capability + notarize，sysext 走 Apple anchor，可保 SIP 完整启用、不需 `developer on`。详见 [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479)。
+> **有 Apple Developer Program 付费账号？** 改用 Developer ID Application + System Extension capability + notarize，sysext 走 Apple anchor，可保 SIP 完整启用、不需 `developer on`。详见 [docs/no-developer-account.md §2.6](docs/no-developer-account.md#L479)。
 
 ### 不需要
 

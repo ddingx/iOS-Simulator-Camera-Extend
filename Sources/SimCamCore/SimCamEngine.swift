@@ -15,7 +15,7 @@ public final class SimCamEngine {
     private let log = OSLog(subsystem: "dev.simcam", category: "engine")
     private let frameSocket = LocalSocketFrameServer()
     /// host → CMIO Camera Extension 的帧通道：Apple 官方 sink stream
-    /// 路径（参见 [CMIOSinkClient.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamCore/CMIOSinkClient.swift) 顶部注释）。
+    /// 路径（参见 [CMIOSinkClient.swift](Sources/SimCamCore/CMIOSinkClient.swift) 顶部注释）。
     /// host 用 `AVCaptureDevice.DiscoverySession([.externalUnknown])` 找
     /// 自家 SimCam Virtual Camera，反查 CMIODeviceID + sink streamID +
     /// CMSimpleQueue，每帧 `CMSimpleQueueEnqueue`。只 push back 槽位的帧。

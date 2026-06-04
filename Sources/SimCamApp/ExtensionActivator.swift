@@ -4,14 +4,15 @@ import Combine
 import OSLog
 
 /// 在 SimCamApp 启动时调用 OSSystemExtensionManager.shared 把
-/// dev.simcam.app.bridge 这个 .systemextension 提交给系统去激活。
+/// dev.simcam.app.extension 这个 .systemextension 提交给系统去激活。
 ///
 /// 第一次安装会弹"系统扩展被阻止" → 用户跳到 System Settings ▸ Privacy &
 /// Security ▸ Allow → 系统会替我们调 cmiod，让 SimCam Virtual Camera 出现在
 /// AVCaptureDevice.DiscoverySession 列表里 —— 然后 iOS 17+ Simulator 也能看见。
 ///
-/// 重点：必须用一个真实的 Apple Developer Team ID 签名，否则
-/// `OSSystemExtensionErrorDomain.codeValidationFailed` 会立刻出现。
+/// 签名路径：默认走 self-signed `SimCam Local Dev`（详见 docs/signing-and-tcc.md），
+/// 配合 `sudo systemextensionsctl developer on` + 一次性最小化 SIP 降级即可加载。
+/// 也可以切到付费 Developer ID + Notarize 路线，详见 docs/no-developer-account.md §2.6。
 @available(macOS 13.0, *)
 public final class ExtensionActivator: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
 
