@@ -26,7 +26,7 @@ This project is a **clean-room re-implementation** of that architecture, built f
 
 The app under test stays on **stock AVFoundation** — `AVCaptureDevice` / `AVCaptureSession` / `AVCaptureMetadataOutput` / `AVCaptureVideoPreviewLayer`. **Not a single line of business code changes, no re-signing, no bundle-id constraint.** Inside the Simulator it sees Mac-side cameras, the desktop, video files, and QR codes.
 
-The whole thing is built on public Apple APIs (`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`) plus `DYLD_INSERT_LIBRARIES` on the Simulator side. **No private SPI, no jailbreak, no SIP-disable** for the Simulator path.
+The whole thing is built on public Apple APIs (`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`) plus `DYLD_INSERT_LIBRARIES` on the Simulator side. **No private SPI, no jailbreak.** The macOS host that runs the CMIO sysext **does require a one-time minimal SIP relaxation** (`csrutil enable --without kext --without debug`) so that `systemextensionsctl developer on` accepts the self-signed signature; every other SIP protection (fs / nvram / dtrace) stays on. The iOS Simulator hook path runs entirely in user space and needs no SIP changes. See [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md).
 
 ---
 
@@ -115,7 +115,7 @@ Both pipelines are wired up and can run **at the same time**:
 - **Switch the source on the fly**: FaceTime HD / Continuity Camera / any Display / any Window / Simulator passthrough (camera "looks through" the simulator window to the desktop) / local image / local video / QR generator / demo card — toggled live from the SimCam menubar.
 - **Real resolution / FPS**: defaults to 1920×1080 / 30fps, follows the actual frame attributes; no letterboxing or upscaling.
 - **Same source as the Simulator hook**: what the CMIO clients see and what the simulator hook delivers are **frame-by-frame identical**; you can run both pipelines simultaneously.
-- **Public APIs only**: pure `CoreMediaIO` / `OSSystemExtensions` / `CMIOExtension*`. No private SPI, no jailbreak, no SIP relaxation.
+- **Public APIs only**: pure `CoreMediaIO` / `OSSystemExtensions` / `CMIOExtension*`. No private SPI, no jailbreak. The CMIO sysext path needs a one-time minimal SIP relaxation (`csrutil enable --without kext --without debug`) so that `systemextensionsctl developer on` accepts the self-signed CA; every other SIP protection stays on.
 
 ### Typical use cases
 
@@ -138,7 +138,7 @@ In addition to the [Requirements](#requirements) section:
 3. **Local code-signing cert *SimCam Local Dev***: `make bootstrap-cert` once, private key stays in your keychain, never committed. The full set of entitlements is injected at re-sign time by [scripts/install-systemext.sh](scripts/install-systemext.sh) — independent of Xcode automatic signing.
 4. **Approve in System Settings on first activation**: macOS *requires* the user to allow the sysext once via *Privacy & Security*. Subsequent rebuilds never re-prompt because the designated requirement is pinned to the certificate CN ([docs/signing-and-tcc.md](docs/signing-and-tcc.md)).
 
-> You do **not** need: SIP relaxation, a paid Apple Developer Program, or a Personal Team.
+> You do **not** need: a paid Apple Developer Program or a Personal Team. You **do** need a one-time minimal SIP relaxation (`csrutil enable --without kext --without debug`) so that `systemextensionsctl developer on` accepts the self-signed CA — see [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md).
 
 ### Bring up the CMIO pipeline (4 commands)
 
@@ -203,7 +203,7 @@ Walk these three in order — they cover roughly 99% of failures:
 
 - Paid Apple Developer Program ($99/yr) — replaced with a local self-signed cert
 - Personal Team — verified that Personal Teams don't support the System Extension capability
-- Disabling SIP, jailbreaking
+- Full SIP disable — only a minimal `--without kext --without debug` relaxation is needed; jailbreaks are not
 - Changing your iOS app's source / SDK / bundle id
 
 ---

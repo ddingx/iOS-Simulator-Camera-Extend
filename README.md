@@ -26,7 +26,7 @@ iOS Simulator 没有相机。一旦你的 app 涉及 `AVCaptureSession`、扫码
 
 被测 app 完全使用 **标准 AVFoundation** —— `AVCaptureDevice` / `AVCaptureSession` / `AVCaptureMetadataOutput` / `AVCaptureVideoPreviewLayer` ——**一行业务代码不改，不重新签名，不换 bundle id**。在 Simulator 里就能拿到 Mac 的摄像头、桌面、视频文件、二维码画面。
 
-整套实现仅依赖 Apple 公开 API（`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`）+ iOS Simulator 上的 `DYLD_INSERT_LIBRARIES`。**没有私有 SPI，不越狱，不关 SIP**（Simulator 路径而言）。
+整套实现仅依赖 Apple 公开 API（`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`）+ iOS Simulator 上的 `DYLD_INSERT_LIBRARIES`。**没有私有 SPI，不越狱**。macOS host 端跑 CMIO sysext **需要一次性最小化降级 SIP**（`csrutil enable --without kext --without debug`）以便 `systemextensionsctl developer on` 接受 self-signed 签名；其余 SIP 保护（fs / nvram / dtrace）保留。iOS Simulator hook 链路完全跑在用户态，不需要任何 SIP 动作。详见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。
 
 ---
 
@@ -115,7 +115,7 @@ flowchart LR
 - **画面源任你切**：FaceTime HD / Continuity Camera / 任意 Display / 任意窗口 / Simulator passthrough（看穿 simulator 这扇窗到桌面）/ 本地图片 / 本地视频 / 二维码生成器 / Demo 卡片，在 SimCam menubar 一键切换。
 - **真实分辨率 / 帧率**：默认 1920×1080 / 30fps，跟随源帧实际属性，不做 letterbox / scale up。
 - **与 Simulator hook 同源**：CMIO 客户端看到的画面和 simulator hook 链路看到的**逐帧一致**，两条管子可以同时开。
-- **零私有 SPI**：纯 Apple 公开 API（`CoreMediaIO` / `OSSystemExtensions` / `CMIOExtension*`），不越狱、不关 SIP。
+- **零私有 SPI**：纯 Apple 公开 API（`CoreMediaIO` / `OSSystemExtensions` / `CMIOExtension*`），不越狱。CMIO sysext 路线一次性最小化降级 SIP（`csrutil enable --without kext --without debug`）即可 —— 让 `systemextensionsctl developer on` 接受本仓库的 self-signed CA 签名；其它 SIP 保护全部保留。
 
 ### 典型使用场景
 

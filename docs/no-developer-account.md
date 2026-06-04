@@ -7,7 +7,7 @@
 > 2. **iOS Simulator 端**：被测 app 的 **标准 AVFoundation API 零代码改动**，就能拿到 host 推过来的画面 / QR / 视频。这条链路是 SimCam 商业版的主打能力。
 >
 > **结论**：两条链路在免账号状态下**都能跑通**。代价：
-> - 链路 1（macOS CMIO）：一次性 `make bootstrap-cert` 生成本地 self-signed CA + `sudo systemextensionsctl developer on`（重启失效，每次开机要再开一次）+ host app 必须装在 `/Applications/`（`make install` 会代办）。**不需要降级 SIP。**
+> - 链路 1（macOS CMIO）：一次性 `make bootstrap-cert` 生成本地 self-signed CA + `sudo systemextensionsctl developer on`（重启失效，每次开机要再开一次）+ host app 必须装在 `/Applications/`（`make install` 会代办）+ **一次性 SIP 最小化降级** `csrutil enable --without kext --without debug`（详见 §2.2.1）。
 > - 链路 2（iOS Simulator hook）：完全不需要降级 SIP、不需要任何系统授权——只要 build 出 dylib 就能注入。
 >
 > **当前已验证范围（macOS 26.2 Tahoe / Xcode 26.2 / iOS Simulator 26.2）**：
@@ -322,36 +322,31 @@ ad-hoc（`codesign -s -`）和 Apple Development（Personal Team 免费签）都
 
 ### 2.2 必须的前置环境
 
-#### 2.2.1 SIP 现状（**不需要降级**）
+#### 2.2.1 SIP 一次性最小化降级（**必须**）
 
-self-signed CA + `systemextensionsctl developer on` 路线**不需要**碰 SIP。保持默认即可。
+self-signed CA + `systemextensionsctl developer on` 路线**必须**做一次最小化 SIP 降级 `csrutil enable --without kext --without debug`，否则 `developer on` 命令会被拒绝、sysext 永远过不了 sysextd 的 trust check。其它 SIP 保护（fs / nvram / dtrace / authenticated-root / kernel integrity）全部保留，这套配置在 Apple 的术语里叫 **Custom Configuration**。
 
-```bash
-csrutil status
-# 期望：System Integrity Protection status: enabled.
-```
+> **依据**：Apple HIDDriverKit 官方 sample [Handling Stylus Input from a Human Interface Device](https://developer.apple.com/documentation/hiddriverkit/handling-stylus-input-from-a-human-interface-device) 在 "Configure the Sample Code Project" 一节明确写：
+>
+> > 1. Disable system integrity protection (SIP) on your system.
+> > 2. Run `systemextensionsctl developer on` from Terminal to enable developer mode.
+>
+> 这是 Apple 官方对开发者模式的前置要求。本仓库选择 `--without kext --without debug` 而非完整 `csrutil disable`，是**最小化**做法，不是"完整启用"。
 
-> 历史版本的笔记曾要求 `csrutil enable --without debug --without kext`，那是基于"用 ad-hoc 签 system extension"的旧路线。现在签名升级到 self-signed CA 后这一步**不需要**做。
-
-##### （可选）SIP 最小化降级：`csrutil enable --without kext --without debug`
-
-下面这条**只**在两种场景下需要做，**当前推荐路线（self-signed CA + `systemextensionsctl developer on`）完全用不上**：
-
-- 场景 A：你不想 / 不能用 self-signed CA（比如团队脚本固定走 ad-hoc 签 sysext 的老路）。
-- 场景 B：你想用 Xcode / lldb **attach 调试**正在运行的 system extension（默认 SIP 会拒绝 `task_for_pid` 到非 Apple 签的进程）。
+**唯一能跑在 SIP 完整启用下的路线**是付费账号 + Developer ID Application 证书 + System Extension capability + notarize（详见 §2.6）。本节描述的是**没有付费账号时**的工作配置。
 
 操作（**只关 kext 校验 + 调试器限制，其它 SIP 保护全部保留**）：
 
 ```bash
 # 1. 关机
-# 2. 长按电源键，直到看到：
-#    Loading startup options
-# 3. 选择：Options / 选项
-#    进入 Recovery。
-# 4. 菜单里打开：Utilities / 实用工具 → Terminal / 终端
-# 5. 执行：
+# 2. Apple Silicon：长按电源键，直到看到：
+#       Loading startup options
+#    选择：Options / 选项 → Continue
+#    Intel：开机时按住 ⌘ + R
+# 3. 进入 Recovery 后，菜单：Utilities / 实用工具 → Terminal / 终端
+# 4. 执行：
 csrutil enable --without kext --without debug
-# 6. 然后：
+# 5. 然后：
 reboot
 ```
 
@@ -377,10 +372,10 @@ csrutil status
 
 | 关掉的开关 | 影响 |
 |---|---|
-| `--without kext` | 允许加载未由 Apple 公证的 kext / 给 sysextd 放行未由 Apple anchor 签的 system extension |
-| `--without debug` | 允许 lldb / Xcode `task_for_pid` attach 到非 Apple 签名进程（用于断点调试 sysext / host） |
+| `--without kext` | 允许加载未由 Apple 公证的 kext / 给 sysextd 放行未由 Apple anchor 签的 system extension（**这条是 self-signed 路线必需的**） |
+| `--without debug` | 允许 lldb / Xcode `task_for_pid` attach 到非 Apple 签名进程（用于断点调试 sysext / host；不调试 sysext 时也建议保留这条，方便日常 attach host app） |
 
-恢复完整 SIP（强烈建议平时保持 enabled 状态，仅调试时降级）：
+恢复完整 SIP（如果改用付费 Team 账号路线、不再需要 `developer on`）：
 
 ```bash
 # Recovery Terminal
@@ -391,7 +386,7 @@ csrutil enable
 reboot
 ```
 
-> 警告：**只在自己的开发机做这个**。SimCam 默认推荐路线是「**SIP 完整启用** + self-signed CA + `systemextensionsctl developer on`」，正常运行 / 安装 / 卸载 / 重签都不需要降级 SIP。本节只为「真的不想用 self-signed CA」或「真的要 attach 调试 sysext」的人保留作为最小化降级方案，避免你看到外网帖子去 `csrutil disable`（那是过度操作）。
+> 警告：**只在自己的开发机做这个**。`csrutil disable`（完整关闭 SIP）是**过度操作**，本仓库**不需要**也**不推荐**——遇到外网帖子让你 `csrutil disable` 时，按本节这个最小化版本即可。
 
 #### 2.2.2 启用 system-extension developer mode
 
@@ -481,6 +476,69 @@ make doctor      # = scripts/diagnose-sysext.sh
 
 > 改任何 CMIO 相关代码或排查 CMIO 链路前，**先扫一眼** [docs/CMIO-LESSONS-LEARNED.md](file:///Users/guoshuyu/workspace/swmansion-copy/docs/CMIO-LESSONS-LEARNED.md)（9 次反转 / 5 个关键证据 / 7 条长期红线）。
 
+### 2.6 如果有 Apple Developer Program 付费账号
+
+付费账号（$99/年）能完全绕开 §2.2.1 的 SIP 降级和 §2.2.2 的 `developer on`，让 sysext 走 **Apple anchor 信任链**。这条路线适合：
+
+- 想在 SIP 完整启用、未碰 `developer on` 的"干净"系统上日常运行；
+- 计划把 SimCam 分发给非开发同事 / 测试机；
+- 不想每次重启都 `sudo systemextensionsctl developer on`。
+
+#### 2.6.1 一次性配置
+
+1. **在 [Apple Developer Account](https://developer.apple.com/account) 申请 System Extension capability**：Identifiers → 创建新 App ID `dev.simcam.host`（host）和 `dev.simcam.host.Extension`（extension），都勾选 **System Extension**。Apple 通常自动批准，CMIO 这种通用类不需要单独申请审查（不像 Endpoint Security / DriverKit family 需要专门 entitlement）。
+2. **下载 / 创建 Developer ID Application 证书**：Xcode → Settings → Accounts → 选你的 Team → Manage Certificates → `+` → Developer ID Application。私钥留在 keychain。
+3. **替换签名身份**：编辑 [Configs/SimCamSigning.local.xcconfig](file:///Users/guoshuyu/workspace/swmansion-copy/Configs/SimCamSigning.local.xcconfig)（不入仓）：
+
+   ```
+   CODE_SIGN_STYLE = Manual
+   CODE_SIGN_IDENTITY = Developer ID Application: Your Name (TEAMID12345)
+   DEVELOPMENT_TEAM = TEAMID12345
+   PROVISIONING_PROFILE_SPECIFIER =
+   ```
+
+4. **更新 designated requirement**：`scripts/install-systemext.sh` 里把 self-signed CA 的 DR 改成 `anchor apple generic and certificate leaf[subject.OU] = "TEAMID12345"`，或者直接让 codesign 用默认 DR（Developer ID 默认就是 Apple anchor）。
+
+#### 2.6.2 Notarize
+
+```bash
+xcodebuild -scheme SimCam -configuration Release -archivePath build/SimCam.xcarchive archive
+xcodebuild -exportArchive -archivePath build/SimCam.xcarchive \
+    -exportOptionsPlist Configs/ExportOptions-DeveloperID.plist \
+    -exportPath build/export
+xcrun notarytool submit build/export/SimCamApp.app --keychain-profile "AC_PASSWORD" --wait
+xcrun stapler staple build/export/SimCamApp.app
+```
+
+`AC_PASSWORD` 是用 `xcrun notarytool store-credentials` 一次性存的 App-specific Password。
+
+#### 2.6.3 验证 SIP 完整启用 + 不需要 developer on
+
+```bash
+# Recovery: csrutil clear; reboot     # 如果之前用过 self-signed 路线，先恢复 SIP
+csrutil status
+# 期望：System Integrity Protection status: enabled.
+
+sudo systemextensionsctl developer off  # 没用过也无所谓
+make install                            # 重签 + 拷贝（脚本内部已识别 Developer ID 身份）
+make run
+```
+
+成功标志：[ExtensionActivator.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/ExtensionActivator.swift) 的 `OSSystemExtensionRequest didFinishWithResult: completed`，sysextd 日志 `validated requirements`，`csrutil status` 仍然是 `enabled`。
+
+#### 2.6.4 取舍
+
+| | self-signed CA + developer on（默认） | Developer ID + Notarize（付费） |
+|---|---|---|
+| Apple 账号成本 | 免费 | $99/年 |
+| SIP 状态 | Custom（kext + debug 关）| **完整启用** |
+| `systemextensionsctl developer on` | 必须，每次重启失效 | 不需要 |
+| 重启心智负担 | 高（要记住 `developer on`） | 零 |
+| 可分发给其它开发机 | 难（每台都要 bootstrap-cert + developer on） | 易（notarize 后直接发 .app） |
+| codesign / sysextd 信任链 | 本地 CA，cdhash 可变（DR 锁 CN）| Apple anchor，cdhash + Apple revocation |
+
+> 本仓库**默认走免费路线**，因为目标用户是"不想付 $99 的开发者"。付费路线只在 §2.6 列出，方便已经有 Team ID 的人切过去。两条路线在源码层面**只差签名身份和 entitlement**，业务代码完全不动。
+
 ---
 
 ## 3. 两条链路同时跑
@@ -499,7 +557,7 @@ CMIO ext: registered           1920×1080 / 30fps
 Sim hook: 1 connected           dev.simcam.demo @ /tmp/com.simcam.frames.sock
 ```
 
-`SimCamEngine.diagnose()` 也会输出 `cmio extension` + `simulator hooks` 两个键，方便测试断言。
+`SimCamEngine.diagnose()` 也会输出 `cmio installed` + `cmio streaming` + `simulator hooks` 三个键，方便测试断言。
 
 ---
 

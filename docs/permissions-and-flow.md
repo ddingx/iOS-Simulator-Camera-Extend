@@ -166,12 +166,14 @@
 sudo systemextensionsctl developer on
 ```
 
-**SIP 状态**：默认推荐路线（self-signed CA + `developer on`）下 **SIP 保持完整启用**即可，不需要降级。**两种例外**才需要最小化降级 `csrutil enable --without kext --without debug`（在 Recovery 终端执行后 reboot；其余 SIP 保护全部保留）：
+**SIP 状态**：默认推荐路线（self-signed CA + `developer on`）下 **必须做一次最小化降级** `csrutil enable --without kext --without debug`（在 Recovery 终端执行后 reboot；其余 SIP 保护 fs / nvram / dtrace 全部保留）。原因：`systemextensionsctl developer on` 在 SIP 完整启用下会被拒绝（Apple HIDDriverKit 官方 sample 第 1 步即为 "Disable SIP"），降级是 sysextd 接受非 Apple anchor 签名的前提。
 
-- 想用 lldb / Xcode `task_for_pid` attach 调试正在运行的 system extension；
-- 不想用 self-signed CA、坚持走 ad-hoc 签 sysext 的老路。
+例外：
 
-正常运行 / 安装 / 卸载 SimCam **都不需要**这步。完整步骤、`csrutil status` 期望输出、恢复方法见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。
+- **有 Apple Developer Program 付费账号**：用 Developer ID Application 证书 + System Extension capability + notarize 后，sysext 走 Apple anchor trust chain，可以保持 SIP 完整启用，也不需要 `developer on`。详见 [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md) "如果有 Apple Developer Program 付费账号"。
+- **iOS Simulator hook 链路**：完全跑在 macOS 用户态，不受 SIP / sysextd 限制，无论 SIP 状态如何都能用。
+
+正常运行 / 安装 / 卸载 SimCam 都依赖上面这次最小化降级。完整步骤、`csrutil status` 期望输出、恢复方法见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。
 
 详见 [Sources/SimCamApp/ExtensionActivator.swift](file:///Users/guoshuyu/workspace/swmansion-copy/Sources/SimCamApp/ExtensionActivator.swift) —— host 端用 `OSSystemExtensionRequest` 走 Apple 官方激活路径；命令行入口是 `make install` + `make run`（自动 build → 重签 → 拷到 `/Applications/` → `chown root:wheel` → open）。
 
