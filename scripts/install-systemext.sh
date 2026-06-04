@@ -26,14 +26,47 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 PROJECT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-SRC="$HOME/Library/Developer/Xcode/DerivedData/SimCam-aouwuqkfbsoimbabffvggfvsvtip/Build/Products/Debug/SimCamApp.app"
+
+# Locate the freshest SimCamApp.app under DerivedData. Avoid hard-coding the
+# project hash suffix (e.g. SimCam-aouwuqkfbsoimbabffvggfvsvtip) — that hash
+# is per-machine, so a checkout on another box will silently fall through to
+# `Built app not found` if we pin it. Strategy:
+#   1. Glob `*Build/Products/Debug/SimCamApp.app` under DerivedData.
+#   2. Skip Index.noindex/ shells (Xcode's index server stages empty dirs).
+#   3. Sort by mtime (newest first) so multi-clone / CI scenarios pick the
+#      build that just finished, not a stale sibling.
+#   4. Fall back to the in-tree build/ dir Xcode produces when DerivedData is
+#      redirected.
+SRC=""
+DERIVED_ROOT="$HOME/Library/Developer/Xcode/DerivedData"
+if [[ -d "$DERIVED_ROOT" ]]; then
+    while IFS= read -r candidate; do
+        [[ -z "$candidate" ]] && continue
+        case "$candidate" in
+            *Index.noindex*) continue ;;
+        esac
+        SRC="$candidate"
+        break
+    done < <(find "$DERIVED_ROOT" -type d -name SimCamApp.app -path '*Build/Products/Debug/SimCamApp.app' 2>/dev/null \
+        | xargs -I{} stat -f '%m %N' {} 2>/dev/null \
+        | sort -rn \
+        | awk '{$1=""; sub(/^ /, ""); print}')
+fi
+if [[ -z "$SRC" || ! -d "$SRC" ]]; then
+    FALLBACK="$PROJECT_ROOT/build/Build/Products/Debug/SimCamApp.app"
+    if [[ -d "$FALLBACK" ]]; then
+        SRC="$FALLBACK"
+    fi
+fi
 DST="/Applications/SimCamApp.app"
 
-if [[ ! -d "$SRC" ]]; then
-    echo "❌ Built app not found at $SRC"
+if [[ -z "$SRC" || ! -d "$SRC" ]]; then
+    echo "❌ Built SimCamApp.app not found under $DERIVED_ROOT or $PROJECT_ROOT/build/"
     echo "   Build first:  xcodebuild -project SimCam.xcodeproj -scheme SimCam -configuration Debug build"
     exit 1
 fi
+
+echo "==> Using build product: $SRC"
 
 if [[ $EUID -ne 0 ]]; then
     echo "ℹ️  Re-running with sudo to write into /Applications/"
@@ -173,5 +206,7 @@ echo "==> Registering with LaunchServices"
 echo
 echo "✅ Installed at $DST"
 echo
-echo "Next: open it (NOT as root) and watch the menubar -> 'Activate Virtual Camera'"
+echo "Next: open it (NOT as root); AppDelegate.applicationDidFinishLaunching"
+echo "      auto-runs ExtensionActivator.shared.activate(). On first run macOS"
+echo "      will prompt 'System Settings -> Privacy & Security -> allow extension'."
 echo "    open '$DST'"

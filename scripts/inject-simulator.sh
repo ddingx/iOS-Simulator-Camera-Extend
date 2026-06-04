@@ -27,26 +27,47 @@ PROJECT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # 找最新一次 build 的 SimCamHook.dylib —— 优先用 Build/Products/ 目录里的
 # universal+codesigned 产物，intermediate 的那份是 *未签名* 的，新版
 # iOS Simulator (>= 17) 会拒绝 dyld 加载。
-# IMPORTANT: 排除 Index.noindex —— 那是 Xcode index server 生成的空壳，
-# 没有真二进制，也没有完整 Info.plist，install/inject 会失败。
-HOOK=$(find ~/Library/Developer/Xcode/DerivedData \
+# IMPORTANT:
+#   - 排除 Index.noindex —— 那是 Xcode index server 生成的空壳，
+#     没有真二进制，也没有完整 Info.plist，install/inject 会失败。
+#   - 按 mtime 排序取最新一份。多次 clone / 多个 scheme 共存时，老的
+#     Build/Products/Debug-iphonesimulator/ 也会留着，`head -1` 不带排序
+#     可能拿到隔月的旧 hook，注入后表现是「画面对得上但 swizzle 行为
+#     和源码对不上」，最难排查。
+pick_latest_hook() {
+    local root="$1"
+    [[ -d "$root" ]] || return 0
+    find "$root" \
             -path '*/Index.noindex/*' -prune -o \
             -path '*Build/Products/Debug-iphonesimulator/libSimCamHook.dylib' \
             -print 2>/dev/null \
-       | grep -v Index.noindex \
-       | head -1)
+        | grep -v Index.noindex \
+        | xargs -I{} stat -f '%m %N' {} 2>/dev/null \
+        | sort -rn \
+        | awk 'NR==1 {$1=""; sub(/^ /, ""); print}'
+}
+
+HOOK=$(pick_latest_hook "$HOME/Library/Developer/Xcode/DerivedData")
 if [[ -z "$HOOK" ]]; then
-    HOOK=$(find "$PROJECT_ROOT/build" \
-                -path '*/Index.noindex/*' -prune -o \
-                -path '*Build/Products/Debug-iphonesimulator/libSimCamHook.dylib' \
-                -print 2>/dev/null \
-           | grep -v Index.noindex \
-           | head -1)
+    HOOK=$(pick_latest_hook "$PROJECT_ROOT/build")
 fi
 if [[ -z "$HOOK" ]]; then
     echo "❌ libSimCamHook.dylib not found in any DerivedData Build/Products."
     echo "   Build it first:  xcodebuild -project SimCam.xcodeproj -scheme SimCamDemo \\"
     echo "       -configuration Debug -destination 'generic/platform=iOS Simulator' build"
+    exit 1
+fi
+
+# Hard-fail if the hook isn't signed at all. iOS Simulator 17+ refuses to
+# DYLD_INSERT an unsigned dylib (the launched app then immediately exits
+# with `Library not loaded`), and that error message is several layers
+# deep in os_log so it's worth checking up front. Both ad-hoc (Signature=adhoc)
+# and proper authority (Authority=...) are acceptable.
+if ! codesign -dvv "$HOOK" 2>&1 | grep -qE 'Signature=adhoc|Authority='; then
+    echo "❌ $HOOK is not codesigned (neither ad-hoc nor with an authority)."
+    echo "   xcodebuild produces signed output under Build/Products/. If you got"
+    echo "   this from the intermediate Build/Intermediates.noindex/ tree, rebuild"
+    echo "   the SimCamHook scheme so Xcode runs the codesign phase."
     exit 1
 fi
 echo "==> hook dylib:   $HOOK"
