@@ -47,10 +47,16 @@ if [[ -d "$DERIVED_ROOT" ]]; then
         esac
         SRC="$candidate"
         break
-    done < <(find "$DERIVED_ROOT" -type d -name SimCamApp.app -path '*Build/Products/Debug/SimCamApp.app' 2>/dev/null \
-        | xargs -I{} stat -f '%m %N' {} 2>/dev/null \
+    # NUL-delimited find -> xargs to survive spaces in $HOME (e.g. corp
+    # laptops with names like "Volumes/Macintosh HD/Users/First Last/...").
+    # macOS BSD `stat -f` does NOT honour \t escapes inside the format
+    # string, so we emit "<mtime> <path>" with a single space and let awk
+    # peel off field 1 and re-emit the rest, preserving any embedded
+    # spaces inside the path.
+    done < <(find "$DERIVED_ROOT" -type d -name SimCamApp.app -path '*Build/Products/Debug/SimCamApp.app' -print0 2>/dev/null \
+        | xargs -0 stat -f '%m %N' 2>/dev/null \
         | sort -rn \
-        | awk '{$1=""; sub(/^ /, ""); print}')
+        | awk '{ mtime = $1; sub(/^[0-9]+ /, ""); print }')
 fi
 if [[ -z "$SRC" || ! -d "$SRC" ]]; then
     FALLBACK="$PROJECT_ROOT/build/Build/Products/Debug/SimCamApp.app"

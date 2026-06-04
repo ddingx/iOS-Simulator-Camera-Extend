@@ -37,14 +37,18 @@ PROJECT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 pick_latest_hook() {
     local root="$1"
     [[ -d "$root" ]] || return 0
+    # NUL-delimited find -> xargs to survive spaces in $HOME / project paths.
+    # macOS BSD `stat -f` does NOT honour \t escapes, so we emit
+    # "<mtime> <path>" with a single space and let awk peel off field 1
+    # and re-emit the rest of the line — that keeps any embedded spaces
+    # inside the path intact.
     find "$root" \
             -path '*/Index.noindex/*' -prune -o \
             -path '*Build/Products/Debug-iphonesimulator/libSimCamHook.dylib' \
-            -print 2>/dev/null \
-        | grep -v Index.noindex \
-        | xargs -I{} stat -f '%m %N' {} 2>/dev/null \
+            -print0 2>/dev/null \
+        | xargs -0 stat -f '%m %N' 2>/dev/null \
         | sort -rn \
-        | awk 'NR==1 {$1=""; sub(/^ /, ""); print}'
+        | awk 'NR==1 { sub(/^[0-9]+ /, ""); print }'
 }
 
 HOOK=$(pick_latest_hook "$HOME/Library/Developer/Xcode/DerivedData")
