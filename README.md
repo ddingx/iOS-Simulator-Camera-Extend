@@ -26,18 +26,28 @@ iOS Simulator 没有相机。一旦你的 app 涉及 `AVCaptureSession`、扫码
 
 被测 app 完全使用 **标准 AVFoundation** —— `AVCaptureDevice` / `AVCaptureSession` / `AVCaptureMetadataOutput` / `AVCaptureVideoPreviewLayer` ——**一行业务代码不改，不重新签名，不换 bundle id**。在 Simulator 里就能拿到 Mac 的摄像头、桌面、视频文件、二维码画面。
 
-整套实现仅依赖 Apple 公开 API（`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`）+ iOS Simulator 上的 `DYLD_INSERT_LIBRARIES`。**没有私有 SPI，不越狱**。macOS host 端跑 CMIO sysext **需要一次性最小化降级 SIP**（`csrutil enable --without kext --without debug`）以便 `systemextensionsctl developer on` 接受 self-signed 签名；其余 SIP 保护（fs / nvram / dtrace）保留。iOS Simulator hook 链路完全跑在用户态，不需要任何 SIP 动作。详见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。
+仅依赖 Apple 公开 API（`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`）+ iOS Simulator 上的 `DYLD_INSERT_LIBRARIES`。**没有私有 SPI，不越狱**。
+
+> CMIO sysext 链路需要一次性最小化降级 SIP：`csrutil enable --without kext --without debug`。其它 SIP 保护（fs / nvram / dtrace）保留；Simulator hook 链路完全用户态、无关 SIP。详见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md)。**有付费 Apple Developer Program？** 可走 Developer ID + Notarize 路线，SIP 完整启用、不需 `developer on`，详见 [§2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479)。
 
 ---
 
-## 能做什么
+## 两条链路
 
-- **被测 app 零侵入**：不需要 SDK、不需要 `import`、不需要重新签名。AVFoundation 用得对，开箱即用。
-- **拦截全部标准 AVFoundation 路径**：`AVCaptureDevice.DiscoverySession`、`AVCaptureSession.addInput`、`AVCaptureVideoDataOutput`、`AVCaptureMetadataOutput`（含二维码）、`AVCaptureVideoPreviewLayer`。
-- **后置 / 前置双槽位独立**：每个槽位独立挑选帧源。
-- **Simulator 窗口穿透（默认后置）**：相机"看穿" Simulator 这扇窗，呈现它背后的桌面，跟随窗口移动。
-- **多种帧源**：Mac 摄像头、整屏 / 单窗口 / Simulator passthrough、本地图片 / 视频、二维码生成器、demo 卡片。
-- **macOS 端虚拟摄像头（可选）**：CMIO Camera System Extension，让 QuickTime / FaceTime / Zoom / OBS 也能选用 *SimCam Virtual Camera*。
+| 你想要的效果 | 走哪条链路 |
+|---|---|
+| iOS Simulator 内的 iOS app（你的 demo / 公司业务 app / 第三方 app）相机预览 / 扫码 / 视频通话拿到自定义画面 | **Simulator hook**（`DYLD_INSERT_LIBRARIES` + AVFoundation swizzle）|
+| macOS 上 QuickTime / FaceTime / Zoom / 飞书 / 腾讯会议 / OBS / Discord 等任意 AVFoundation 客户端切换摄像头 | **CMIO sysext**（macOS Camera System Extension）|
+
+两条链路共享同一份帧源（`SimCamEngine`），可以**同时**开。在 SimCam menubar 把 back / front 切到 *FaceTime HD / Image / Video / QR / Simulator passthrough / 任意窗口或 Display*，QuickTime 与 simulator 里 iOS app 看到的画面**逐帧同源、同步切换**。
+
+**核心能力**：
+
+- 被测 app 零侵入：不需要 SDK / `import` / 重新签名，AVFoundation 用得对就开箱即用。
+- 拦截全部标准 AVFoundation 路径：`AVCaptureDevice.DiscoverySession`、`AVCaptureSession.addInput`、`AVCaptureVideoDataOutput`、`AVCaptureMetadataOutput`（含二维码）、`AVCaptureVideoPreviewLayer`。
+- 后置 / 前置双槽位独立挑选帧源。
+- Simulator 窗口穿透（默认后置）：相机"看穿" Simulator 这扇窗，呈现它背后的桌面，跟随窗口移动。
+- 帧源类型：Mac 摄像头、整屏 / 单窗口 / Simulator passthrough、本地图片 / 视频、二维码生成器、demo 卡片。
 
 ---
 
@@ -84,21 +94,6 @@ flowchart LR
 
 ---
 
-## 现在能做什么
-
-两条链路都打通了，可以**同时**用：
-
-| 你想要的效果 | 走哪条链路 | 服务对象 |
-|---|---|---|
-| 在 **iOS Simulator 里**跑你的 iOS app，让它的相机预览 / 扫码 / 视频通话拿到自定义画面 | **Simulator hook 链路**（`DYLD_INSERT_LIBRARIES` + AVFoundation swizzle） | 任何 simulator 内的 iOS app（你的 demo、你公司业务 app、第三方 app） |
-| 在 **macOS 上**用 QuickTime / FaceTime / Zoom / 飞书 / 腾讯会议 / OBS / Discord 等任意 AVFoundation 客户端，把摄像头切成自定义画面 | **CMIO sysext 链路**（macOS Camera System Extension） | 任何 macOS AVFoundation 客户端 |
-
-**两条链路共享同一个画面源**：你在 SimCam menubar 里把 back/front 切到 *FaceTime HD / Image / Video / QR / Simulator passthrough / 任意窗口或 Display*，QuickTime 看到的画面、simulator 内 iOS app 看到的画面**完全同源、同步切换**。
-
-> 注意：**iOS Simulator 内 iOS app 不可能直接走 CMIO** —— iOS SDK 里根本没有 CMIO 接口，这是 Apple 平台的硬限制（不是本项目能解决的，SimCam 商业版同样如此）。所以"让 simulator 里 iOS app 看到 SimCam 画面"必须走 hook 链路。这跟 SimCam 官网"without changing anything in your app"承诺并不矛盾——指的是**你 iOS app 代码不改 / 不引 SDK / 不换 bundle id**，并不是不需要在 Mac 一侧做注入步骤。
-
----
-
 ## CMIO 虚拟摄像头（macOS 链路）
 
 > 这一节专门介绍 CMIO 链路。它的能力相对于 Simulator hook 是**完全独立的**：你**不需要** iOS Simulator、不需要任何 dylib 注入、不需要被测 app；只要 sysext 装上，**任何**走 macOS AVFoundation 的相机 app（QuickTime、FaceTime、Zoom、腾讯会议、飞书、OBS、Discord、Chrome、Safari WebRTC、Photo Booth …）都会在它的相机下拉里看到一台 *SimCam Virtual Camera*。
@@ -108,14 +103,6 @@ flowchart LR
 <br />
 <sub>QuickTime → New Movie Recording → Camera 下拉勾选 <b>SimCam Virtual Camera</b>，画面是 SimCam menubar 切到的画面源（这里是 Cat Camera 实拍）。</sub>
 </div>
-
-### 它能做什么
-
-- **macOS 一台真正的虚拟摄像头**：在系统层注册成一台 `AVCaptureDevice`，所有遵循 AVFoundation 的客户端都能选；不依赖各家 app 的"虚拟相机插件"机制。
-- **画面源任你切**：FaceTime HD / Continuity Camera / 任意 Display / 任意窗口 / Simulator passthrough（看穿 simulator 这扇窗到桌面）/ 本地图片 / 本地视频 / 二维码生成器 / Demo 卡片，在 SimCam menubar 一键切换。
-- **真实分辨率 / 帧率**：默认 1920×1080 / 30fps，跟随源帧实际属性，不做 letterbox / scale up。
-- **与 Simulator hook 同源**：CMIO 客户端看到的画面和 simulator hook 链路看到的**逐帧一致**，两条管子可以同时开。
-- **零私有 SPI**：纯 Apple 公开 API（`CoreMediaIO` / `OSSystemExtensions` / `CMIOExtension*`），不越狱。CMIO sysext 路线一次性最小化降级 SIP（`csrutil enable --without kext --without debug`）即可 —— 让 `systemextensionsctl developer on` 接受本仓库的 self-signed CA 签名；其它 SIP 保护全部保留。
 
 ### 典型使用场景
 
@@ -129,18 +116,9 @@ flowchart LR
 | **iOS Simulator 里**的 iOS app 看到自定义相机画面 | 否 | iOS SDK 没有 CMIO，必须走 [Simulator hook 链路](#跑通-simulator-hook-链路让-ios-app-看到画面) |
 | **iOS 真机** | 否 | iOS 真机相机在沙箱外，无内核级 hook 不可能；本仓库不涉及 |
 
-### 运行 CMIO 链路需要什么
-
-只列**额外**于 [环境准备](#环境准备) 的项：
-
-1. **`/Applications/` 写权限**（sudo）：sysextd 硬约束，host bundle 必须从 `/Applications/SimCamApp.app` 起动，且 owner 必须是 `root:wheel`。`make install` 已经把这套封装好了。
-2. **`sudo systemextensionsctl developer on`**：让 sysextd 接受非 Apple anchor 签名（本仓库走 self-signed CA）。**重启失效**，每次开机得重开。
-3. **本地代码签名证书 SimCam Local Dev**：`make bootstrap-cert` 一次性生成，私钥留 keychain，不入仓。配套 entitlements 全部走 [scripts/install-systemext.sh](scripts/install-systemext.sh) 在重签时注入，不依赖 Xcode 自动签名。
-4. **首次激活时去 System Settings 点 Allow**：sysext 一定要用户在 *Privacy & Security* 里同意一次，这是 Apple 强制的。之后任何 rebuild 不再弹（DR 锁 CN，TCC 不失忆，详见 [docs/signing-and-tcc.md](docs/signing-and-tcc.md)）。
-
-> 完全 **不需要** 关 SIP、不需要付费 Apple Developer Program、不需要 Personal Team。
-
 ### 跑通 CMIO 链路（4 条命令）
+
+需要：`/Applications/` 写权限（sudo）+ `SimCam Local Dev` 证书（`make bootstrap-cert` 一次生成）+ `developer on`（重启失效）+ 一次性 SIP 最小化降级（详见 [§环境准备](#环境准备)）。**有付费 Team 账号？** Developer ID + Notarize 路线可保 SIP 完整启用、不需 `developer on`，详见 [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479)。
 
 ```bash
 # 一次性 setup（每台机器一次）
@@ -170,13 +148,7 @@ system_profiler SPCameraDataType | grep -A2 SimCam
 # 期望：SimCam Virtual Camera
 ```
 
-### CMIO 链路出问题怎么办
-
-按这三条按顺序看，走过 99% 故障：
-
-1. `make doctor` —— 一键体检 SIP、developer mode、签名身份、host 安装位置、sysextd 最近 5 分钟日志；
-2. [docs/permissions-and-flow.md §3](docs/permissions-and-flow.md) —— 权限矩阵 + 故障排查；
-3. [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) —— 我们自己一晚上踩坑反转 9 次的复盘，每条都有"症状 / 反证 / 不要再走"的红线，强烈建议**改 CMIO 相关代码前先扫一遍**。
+出问题：先 `make doctor`，再翻 [docs/permissions-and-flow.md §3](docs/permissions-and-flow.md)，最后看 [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md)（9 次反转 / 5 关键证据 / 7 长期红线，**改 CMIO 代码前先扫一遍**）。
 
 ---
 
@@ -195,15 +167,19 @@ system_profiler SPCameraDataType | grep -A2 SimCam
 
 | 项 | 说明 |
 |---|---|
+| **一次性 SIP 最小化降级** | `csrutil enable --without kext --without debug`（Recovery 终端执行后 reboot；其余 SIP 保护 fs / nvram / dtrace 全部保留）。这是 `developer on` 接受非 Apple anchor 签名的前提；Apple HIDDriverKit 官方 sample 也是先关 SIP 再开 dev mode。详见 [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md) |
 | **SIP developer mode** | `sudo systemextensionsctl developer on`（重启失效，每次开机要重开一次） |
 | **sudo 权限** | 装 sysext 必须把 host bundle 拷到 `/Applications/` 并 `chown root:wheel`（sysextd 的硬约束） |
 | **本地自签名证书 SimCam Local Dev** | 一次性，`make bootstrap-cert` 生成并导入 keychain；私钥不入仓 |
 
+> **有 Apple Developer Program 付费账号？** 改用 Developer ID Application + System Extension capability + notarize，sysext 走 Apple anchor，可保 SIP 完整启用、不需 `developer on`。详见 [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479)。
+
 ### 不需要
 
-- 付费 Apple Developer Program（$99/年）—— 用本地自签名证书替代
+- 付费 Apple Developer Program（$99/年）—— 用本地自签名证书替代（如有，则可走 §2.6 付费路线，免 SIP 降级 / 免 `developer on`）
 - Personal Team —— 已验证 Personal Team 不支持 System Extension capability
-- 关 SIP / 越狱
+- **完整**关 SIP（`csrutil disable`）—— 只需上面那个最小化降级，不要再多关
+- 越狱
 - 改 iOS app 代码、装 SDK、换 bundle id
 
 ---
@@ -284,7 +260,7 @@ xcrun simctl install booted /path/to/YourApp.app
 
 - **真机**虚拟相机：不可能。iOS 真机相机 API 在沙箱外，需要内核级 hook 或越狱，本仓库不涉及。
 - 想发布到 App Store 的 app 用它：本仓库的 dylib 注入只在 *Simulator* 进程内有效，不进 ipa，对 App Store 审核没影响 —— 但它也不是给生产用的"假相机源"。
-- 不想 inject、想让 simulator 内 iOS app 走 CMIO 那条管子：见上面方框里的解释，物理上不可能。
+- 不想 inject、想让 simulator 内 iOS app 走 CMIO 那条管子：物理上不可能 —— iOS SDK 没有 CMIO 接口，这是 Apple 平台的硬限制（SimCam 商业版同此）。SimCam 官网"without changing anything in your app"指的是**iOS app 代码不改 / 不引 SDK / 不换 bundle id**，并不是不需要 Mac 一侧做注入。
 
 ---
 

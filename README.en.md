@@ -26,18 +26,28 @@ This project is a **clean-room re-implementation** of that architecture, built f
 
 The app under test stays on **stock AVFoundation** — `AVCaptureDevice` / `AVCaptureSession` / `AVCaptureMetadataOutput` / `AVCaptureVideoPreviewLayer`. **Not a single line of business code changes, no re-signing, no bundle-id constraint.** Inside the Simulator it sees Mac-side cameras, the desktop, video files, and QR codes.
 
-The whole thing is built on public Apple APIs (`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`) plus `DYLD_INSERT_LIBRARIES` on the Simulator side. **No private SPI, no jailbreak.** The macOS host that runs the CMIO sysext **does require a one-time minimal SIP relaxation** (`csrutil enable --without kext --without debug`) so that `systemextensionsctl developer on` accepts the self-signed signature; every other SIP protection (fs / nvram / dtrace) stays on. The iOS Simulator hook path runs entirely in user space and needs no SIP changes. See [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md).
+Built on public Apple APIs only (`ScreenCaptureKit` / `AVFoundation` / `CoreMediaIO` / `OSSystemExtensionRequest`) plus `DYLD_INSERT_LIBRARIES` on the Simulator side. **No private SPI, no jailbreak.**
+
+> The CMIO sysext path needs a one-time minimal SIP relaxation: `csrutil enable --without kext --without debug`. Every other SIP protection (fs / nvram / dtrace) stays on; the Simulator hook path is fully user-space and SIP-agnostic. See [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md). **Have a paid Apple Developer Program?** Use the Developer ID + Notarize route — SIP stays fully on, no `developer on` needed; see [§2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479).
 
 ---
 
-## What it does
+## Two pipelines
 
-- **Zero changes to the app under test**: no SDK, no `import`, no re-signing. Use AVFoundation correctly and it Just Works.
-- **All standard AVFoundation paths intercepted**: `AVCaptureDevice.DiscoverySession`, `AVCaptureSession.addInput`, `AVCaptureVideoDataOutput`, `AVCaptureMetadataOutput` (QR included), `AVCaptureVideoPreviewLayer`.
-- **Independent back / front slots**, each with its own source.
-- **Simulator-window passthrough (default back)**: the camera "looks through" the Simulator window onto the desktop behind it, follows the window as you drag.
-- **Many sources**: Mac camera, full screen / single window / Simulator passthrough, local image / video file, QR generator, demo card.
-- **Optional macOS virtual camera**: a CMIO Camera System Extension so QuickTime / FaceTime / Zoom / OBS can also pick *SimCam Virtual Camera*.
+| What you want | Which pipeline |
+|---|---|
+| iOS app inside the iOS Simulator (your demo / business app / third-party) sees custom frames in camera preview / QR scanner / video calls | **Simulator hook** (`DYLD_INSERT_LIBRARIES` + AVFoundation swizzle) |
+| On macOS, swap the camera feed for QuickTime / FaceTime / Zoom / Teams / Google Meet / OBS / Discord — any AVFoundation client | **CMIO sysext** (macOS Camera System Extension) |
+
+Both pipelines share the same frame source (`SimCamEngine`) and can run **simultaneously**. Pick *FaceTime HD / Image / Video / QR / Simulator passthrough / any window or display* in the SimCam menubar and what QuickTime sees and what your iOS app inside the simulator sees are **frame-by-frame identical, switched in sync**.
+
+**Core capabilities**:
+
+- Zero changes to the app under test: no SDK / `import` / re-signing — use AVFoundation correctly and it Just Works.
+- All standard AVFoundation paths intercepted: `AVCaptureDevice.DiscoverySession`, `AVCaptureSession.addInput`, `AVCaptureVideoDataOutput`, `AVCaptureMetadataOutput` (QR included), `AVCaptureVideoPreviewLayer`.
+- Independent back / front slots, each with its own source.
+- Simulator-window passthrough (default back): the camera "looks through" the Simulator window onto the desktop behind it, follows the window as you drag.
+- Source types: Mac camera, full screen / single window / Simulator passthrough, local image / video file, QR generator, demo card.
 
 ---
 
@@ -84,21 +94,6 @@ The wire protocol (48-byte v2 header with `cameraSlot`) is in [SimCamHook.h](Sou
 
 ---
 
-## What works today
-
-Both pipelines are wired up and can run **at the same time**:
-
-| What you want | Which pipeline | Who it serves |
-|---|---|---|
-| Run your iOS app **inside iOS Simulator** and have its camera preview / QR scanner / video-call code see custom frames | **Simulator hook pipeline** (`DYLD_INSERT_LIBRARIES` + AVFoundation swizzle) | Any iOS app inside the simulator (the bundled demo, your business app, third-party apps) |
-| On **macOS**, swap the camera feed for QuickTime / FaceTime / Zoom / Teams / Google Meet / OBS / Discord — any AVFoundation client | **CMIO sysext pipeline** (macOS Camera System Extension) | Any macOS AVFoundation client |
-
-**Both pipelines share the same source**: pick *FaceTime HD / Image / Video / QR / Simulator passthrough / any window or display* in the SimCam menubar, and what QuickTime sees and what your iOS app inside the simulator sees are **identical, switched in sync**.
-
-> Note: **An iOS app inside the Simulator cannot reach the CMIO sysext directly** — the iOS SDK has no CMIO surface area. This is an Apple platform limitation, not something this project can solve, and it is the same for the commercial SimCam. So "iOS apps inside the simulator see the SimCam feed" must go through the hook pipeline. This does **not** contradict the SimCam tagline "without changing anything in your app" — that means **you don't change your iOS app's code / SDKs / bundle id**, not that no Mac-side injection is required.
-
----
-
 ## CMIO virtual camera (macOS path)
 
 > This section is dedicated to the CMIO pipeline. It is **fully independent** of the Simulator hook: you don't need an iOS Simulator, no dylib injection, no app under test. Once the sysext is installed, **every** macOS AVFoundation camera client (QuickTime, FaceTime, Zoom, Teams, Meet, OBS, Discord, Chrome / Safari WebRTC, Photo Booth …) will list a *SimCam Virtual Camera* in its camera dropdown.
@@ -108,14 +103,6 @@ Both pipelines are wired up and can run **at the same time**:
 <br />
 <sub>QuickTime → New Movie Recording → camera dropdown ticks <b>SimCam Virtual Camera</b>; the picture is whatever you picked in the SimCam menubar (Cat Camera live capture in this shot).</sub>
 </div>
-
-### What it can do
-
-- **A real macOS virtual camera**: registered as an `AVCaptureDevice` at the system layer, picked up by every AVFoundation client without per-app virtual-camera plugins.
-- **Switch the source on the fly**: FaceTime HD / Continuity Camera / any Display / any Window / Simulator passthrough (camera "looks through" the simulator window to the desktop) / local image / local video / QR generator / demo card — toggled live from the SimCam menubar.
-- **Real resolution / FPS**: defaults to 1920×1080 / 30fps, follows the actual frame attributes; no letterboxing or upscaling.
-- **Same source as the Simulator hook**: what the CMIO clients see and what the simulator hook delivers are **frame-by-frame identical**; you can run both pipelines simultaneously.
-- **Public APIs only**: pure `CoreMediaIO` / `OSSystemExtensions` / `CMIOExtension*`. No private SPI, no jailbreak. The CMIO sysext path needs a one-time minimal SIP relaxation (`csrutil enable --without kext --without debug`) so that `systemextensionsctl developer on` accepts the self-signed CA; every other SIP protection stays on.
 
 ### Typical use cases
 
@@ -129,18 +116,9 @@ Both pipelines are wired up and can run **at the same time**:
 | iOS app **inside iOS Simulator** seeing custom camera frames | No | The iOS SDK has no CMIO; you must use the [Simulator hook pipeline](#bring-up-the-simulator-hook-pipeline-let-your-ios-app-see-the-feed) |
 | **Real iOS device** | No | iOS device cameras live outside the sandbox; impossible without kernel hooks. Out of scope here |
 
-### What you need (CMIO-only)
-
-In addition to the [Requirements](#requirements) section:
-
-1. **Write access to `/Applications/`** (sudo): hard rule from sysextd — the host bundle must launch from `/Applications/SimCamApp.app` and be owned by `root:wheel`. `make install` packages this for you.
-2. **`sudo systemextensionsctl developer on`**: lets sysextd accept non-Apple-anchored signatures (this repo uses a self-signed CA). **Resets on every reboot** — re-run after each restart.
-3. **Local code-signing cert *SimCam Local Dev***: `make bootstrap-cert` once, private key stays in your keychain, never committed. The full set of entitlements is injected at re-sign time by [scripts/install-systemext.sh](scripts/install-systemext.sh) — independent of Xcode automatic signing.
-4. **Approve in System Settings on first activation**: macOS *requires* the user to allow the sysext once via *Privacy & Security*. Subsequent rebuilds never re-prompt because the designated requirement is pinned to the certificate CN ([docs/signing-and-tcc.md](docs/signing-and-tcc.md)).
-
-> You do **not** need: a paid Apple Developer Program or a Personal Team. You **do** need a one-time minimal SIP relaxation (`csrutil enable --without kext --without debug`) so that `systemextensionsctl developer on` accepts the self-signed CA — see [docs/no-developer-account.md §2.2.1](docs/no-developer-account.md).
-
 ### Bring up the CMIO pipeline (4 commands)
+
+You'll need: write access to `/Applications/` (sudo) + the `SimCam Local Dev` cert (`make bootstrap-cert`, one-shot) + `developer on` (resets on reboot) + a one-time minimal SIP relaxation (see [Requirements](#requirements)). **Have a paid Team account?** The Developer ID + Notarize route keeps SIP fully on and skips `developer on` — see [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479).
 
 ```bash
 # One-time setup (per machine)
@@ -156,7 +134,7 @@ After launching:
 
 1. The SimCam icon shows up in the menubar; open the popover.
 2. macOS prompts *"System software from SimCam Local Dev was blocked"* on first activation → System Settings → Privacy & Security → Allow at the bottom → enter password.
-3. **Cmd-Q QuickTime and relaunch it** (QuickTime caches the camera list at process start, so any client running before the sysext registered won't see the new device).
+3. **Cmd-Q QuickTime and relaunch it** (QuickTime caches the camera list at process start).
 4. QuickTime → New Movie Recording → camera dropdown shows *SimCam Virtual Camera*.
 5. From the SimCam menubar, switch *Back camera source* to FaceTime HD / Cat Camera / Image / Video / Simulator passthrough / any Display or Window — QuickTime updates live.
 
@@ -170,13 +148,7 @@ system_profiler SPCameraDataType | grep -A2 SimCam
 # Expected: SimCam Virtual Camera
 ```
 
-### When the CMIO pipeline misbehaves
-
-Walk these three in order — they cover roughly 99% of failures:
-
-1. `make doctor` — one-shot health check (SIP / developer mode / signing identity / install location / sysextd log for the last 5 minutes).
-2. [docs/permissions-and-flow.md §3](docs/permissions-and-flow.md) — permissions matrix and triage.
-3. [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) — our own one-night-of-debugging post-mortem (9 reversals / 5 missed pieces of evidence / 7 long-term tripwires). **Read this before changing anything CMIO-related.**
+When something's off: run `make doctor` first, then read [docs/permissions-and-flow.md §3](docs/permissions-and-flow.md), and finally [docs/CMIO-LESSONS-LEARNED.md](docs/CMIO-LESSONS-LEARNED.md) (9 reversals / 5 missed pieces of evidence / 7 long-term tripwires — **read before touching CMIO code**).
 
 ---
 
@@ -195,15 +167,19 @@ Walk these three in order — they cover roughly 99% of failures:
 
 | Item | Notes |
 |---|---|
+| **One-time minimal SIP relaxation** | `csrutil enable --without kext --without debug` (run from Recovery Terminal then reboot; every other SIP protection — fs / nvram / dtrace — stays on). This is the prerequisite for `developer on` to accept non-Apple-anchored signatures; Apple's HIDDriverKit sample also says "Disable SIP" first. See [docs/no-developer-account.md §2.2.1](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md) |
 | **System-extension developer mode** | `sudo systemextensionsctl developer on` (resets on reboot, re-run after every restart) |
 | **sudo access** | Installing a sysext requires copying the host bundle to `/Applications/` and `chown root:wheel` (sysextd's hard rule) |
 | **Local self-signed cert: SimCam Local Dev** | One-shot `make bootstrap-cert`, generated and imported into login keychain; the private key is **never** committed |
 
+> **Have a paid Apple Developer Program?** Use Developer ID Application + System Extension capability + notarize instead — the sysext rides the Apple anchor, SIP can stay fully enabled, no `developer on` needed. See [docs/no-developer-account.md §2.6](file:///Users/guoshuyu/workspace/swmansion-copy/docs/no-developer-account.md#L479).
+
 ### Not required
 
-- Paid Apple Developer Program ($99/yr) — replaced with a local self-signed cert
+- Paid Apple Developer Program ($99/yr) — replaced with a local self-signed cert (with a paid Team you can take the §2.6 route, skip the SIP relaxation and `developer on` altogether)
 - Personal Team — verified that Personal Teams don't support the System Extension capability
-- Full SIP disable — only a minimal `--without kext --without debug` relaxation is needed; jailbreaks are not
+- **Full** SIP disable (`csrutil disable`) — only the minimal relaxation above; do not turn more off
+- Jailbreaks
 - Changing your iOS app's source / SDK / bundle id
 
 ---
@@ -284,7 +260,7 @@ The signing rationale lives in [docs/signing-and-tcc.md](docs/signing-and-tcc.md
 
 - **Real-device** virtual camera: not possible. iOS device camera APIs live outside the sandbox; you'd need kernel-level hooks or a jailbreak. Out of scope here.
 - A camera source for App Store apps: the dylib is injected only inside the *Simulator* process, never ends up in your `.ipa`, has no impact on App Store review — but it is also not a production "fake camera source".
-- Skip injection and have the iOS app inside the simulator go through CMIO: see the boxed note above. Apple's SDK boundary makes this physically impossible.
+- Skip injection and have the iOS app inside the simulator go through CMIO: physically impossible — the iOS SDK has no CMIO surface (same for the commercial SimCam). The SimCam tagline "without changing anything in your app" means **no changes to your iOS app's code / SDKs / bundle id**, not "no Mac-side injection".
 
 ---
 
