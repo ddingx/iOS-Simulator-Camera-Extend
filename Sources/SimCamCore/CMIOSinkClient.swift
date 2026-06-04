@@ -345,13 +345,6 @@ public final class CMIOSinkClient {
         return nil
     }
 
-    /// step 2: 用 AVCaptureDevice.uniqueID 反查 CMIODeviceID。
-    /// 走 `kCMIOHardwarePropertyDevices` 拿 device list，再用
-    /// `kCMIODevicePropertyDeviceUID` 比对——这是 fuziki 项目的关键步骤。
-    private func lookupCMIODeviceID(uniqueID: String) -> CMIODeviceID? {
-        return lookupCMIODeviceIDByUID(uniqueID, tick: 0, logProgress: false)
-    }
-
     /// HAL 层直接扫所有 CMIODeviceID，把 deviceUID 字符串与 needle 对比。
     /// 跟 AVFoundation `DiscoverySession` 完全无关 —— cmiod 在 HAL 层
     /// 不对自家 host 屏蔽自家 sysext device（已用 system_profiler 旁证）。
