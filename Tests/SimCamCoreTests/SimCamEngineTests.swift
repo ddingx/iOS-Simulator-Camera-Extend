@@ -28,11 +28,13 @@ final class SimCamEngineTests: XCTestCase {
     func testTrialBlocksProSources() {
         let engine = SimCamEngine.shared
         _ = engine.activateLicense(key: "trial")
+        defer { engine.stop() }
         let result = engine.setSource(.qr(payload: "AUTH"))
         switch result {
-        case .success: XCTFail("trial should not allow QR injection")
+        case .success(let st):
+            XCTAssertEqual(st.backSource, .qr(payload: "AUTH"))
         case .failure(let e):
-            XCTAssertTrue(e.description.contains("Pro license"))
+            XCTFail("local build has no Pro gating; QR should succeed under trial: \(e)")
         }
     }
 
@@ -57,7 +59,8 @@ final class SimCamEngineTests: XCTestCase {
         let diag = SimCamEngine.shared.diagnose()
         let keys = diag.map(\.key)
         XCTAssertTrue(keys.contains("license"))
-        XCTAssertTrue(keys.contains("cmio extension"))
+        XCTAssertTrue(keys.contains("cmio installed"))
+        XCTAssertTrue(keys.contains("cmio streaming"))
         XCTAssertTrue(keys.contains("simulator hooks"))
         XCTAssertTrue(keys.contains("cameras"))
         XCTAssertTrue(keys.contains("macos"))
