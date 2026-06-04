@@ -80,6 +80,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = SimCamSigning.xcconfig; path = Configs/SimCamSigning.xcconfig; sourceTree = SOURCE_ROOT; };
 		0DDC5252DAED881AD4C5A509 /* MenubarViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenubarViewModel.swift; sourceTree = "<group>"; };
 		11D68E4E00E9885370373F46 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		179439B699C7855467D9AAD4 /* libSimCamHook.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libSimCamHook.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -111,6 +112,15 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		AABBCC1111111111DEADBEEF /* Configs */ = {
+			isa = PBXGroup;
+			children = (
+				AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */,
+			);
+			name = Configs;
+			path = Configs;
+			sourceTree = "<group>";
+		};
 		07868AC6C892D06380878C28 /* SimCamDemoApp */ = {
 			isa = PBXGroup;
 			children = (
@@ -147,6 +157,7 @@
 				73C72DB8F27D1DA1A440ABC0 /* Sources */,
 				5349F082006917C608812058 /* Tests */,
 				21F52DF13192128A353DE99D /* Products */,
+				AABBCC1111111111DEADBEEF /* Configs */,
 			);
 			sourceTree = "<group>";
 		};
@@ -508,15 +519,16 @@
 		};
 		1E99B6DEC0520469BBE5FE51 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/SimCamApp/Resources/SimCamApp.entitlements;
-				CODE_SIGN_IDENTITY = "SimCam Local Dev";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "$(SIMCAM_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(SIMCAM_CODE_SIGN_STYLE)";
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(SIMCAM_DEVELOPMENT_TEAM)";
 				INFOPLIST_FILE = Sources/SimCamApp/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -577,6 +589,7 @@
 		};
 		4EFEDCC47A0988D9F36067EB /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -610,11 +623,11 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
-				CODE_SIGN_IDENTITY = "SimCam Local Dev";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "$(SIMCAM_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(SIMCAM_CODE_SIGN_STYLE)";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(SIMCAM_DEVELOPMENT_TEAM)";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -639,14 +652,15 @@
 		};
 		4FF48A589E05A438DE126525 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Sources/SimCamExtension/Resources/SimCamExtension.entitlements;
-				CODE_SIGN_IDENTITY = "SimCam Local Dev";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "$(SIMCAM_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(SIMCAM_CODE_SIGN_STYLE)";
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(SIMCAM_DEVELOPMENT_TEAM)";
 				ENABLE_HARDENED_RUNTIME = YES;
 				EXECUTABLE_NAME = SimCamExtension;
 				INFOPLIST_FILE = Sources/SimCamExtension/Resources/Info.plist;
@@ -667,6 +681,7 @@
 		};
 		5EE03E8E8784420C1E9D3A31 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -700,11 +715,11 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
-				CODE_SIGN_IDENTITY = "SimCam Local Dev";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "$(SIMCAM_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(SIMCAM_CODE_SIGN_STYLE)";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(SIMCAM_DEVELOPMENT_TEAM)";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -736,12 +751,13 @@
 		};
 		67D4EA9235D9D98FC503E9B1 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "SimCam Local Dev";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "$(SIMCAM_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(SIMCAM_CODE_SIGN_STYLE)";
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(SIMCAM_DEVELOPMENT_TEAM)";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -757,14 +773,15 @@
 		};
 		70874182F1FBE158A8891A48 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Sources/SimCamExtension/Resources/SimCamExtension.entitlements;
-				CODE_SIGN_IDENTITY = "SimCam Local Dev";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "$(SIMCAM_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(SIMCAM_CODE_SIGN_STYLE)";
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(SIMCAM_DEVELOPMENT_TEAM)";
 				ENABLE_HARDENED_RUNTIME = YES;
 				EXECUTABLE_NAME = SimCamExtension;
 				INFOPLIST_FILE = Sources/SimCamExtension/Resources/Info.plist;
@@ -831,15 +848,16 @@
 		};
 		BB65CE900B6B9944C237E0D5 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/SimCamApp/Resources/SimCamApp.entitlements;
-				CODE_SIGN_IDENTITY = "SimCam Local Dev";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "$(SIMCAM_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(SIMCAM_CODE_SIGN_STYLE)";
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(SIMCAM_DEVELOPMENT_TEAM)";
 				INFOPLIST_FILE = Sources/SimCamApp/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -854,12 +872,13 @@
 		};
 		C7E665339A987A9B84D3DF08 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABBCC0000000000DEADBEEF /* SimCamSigning.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "SimCam Local Dev";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "$(SIMCAM_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(SIMCAM_CODE_SIGN_STYLE)";
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(SIMCAM_DEVELOPMENT_TEAM)";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
