@@ -5,6 +5,7 @@ build/
 # Xcode 用户态
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
+**/*.xcworkspace/xcuserdata/
 
 # 本地签名 override（机器相关，不能进仓库）
 # Configs/SimCamSigning.xcconfig 是公共默认值，必须入仓
