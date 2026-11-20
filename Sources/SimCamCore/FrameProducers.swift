@@ -251,7 +251,21 @@ enum SampleBufferFactory {
                                   space: cs,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                                     | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
-        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: format.width, height: format.height))
+        // 等比缩放居中（不再拉满整帧）。之前的 `ctx.draw(cgImage, in: 整帧)`
+        // 会把方形内容（二维码、图片）横向拉伸成 16:9，二维码因此变形、
+        // 扫不出来。这里按 aspect-fit 居中绘制，四周补黑。
+        let dstW = CGFloat(format.width)
+        let dstH = CGFloat(format.height)
+        let srcW = CGFloat(cgImage.width)
+        let srcH = CGFloat(cgImage.height)
+        guard srcW > 0, srcH > 0 else { return nil }
+        let scale = min(dstW / srcW, dstH / srcH)
+        let drawW = srcW * scale
+        let drawH = srcH * scale
+        ctx.setFillColor(red: 0, green: 0, blue: 0, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: dstW, height: dstH))
+        ctx.draw(cgImage, in: CGRect(x: (dstW - drawW) / 2, y: (dstH - drawH) / 2,
+                                     width: drawW, height: drawH))
 
         var formatDesc: CMFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,

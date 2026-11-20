@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CoreImage
 import CoreMedia
 import CoreMediaIO
 import CoreVideo
@@ -133,6 +134,16 @@ public final class CMIOSinkClient {
         // queue depth=cap 顶满，但 sysext 那边一帧都收不到。
         guard canEnqueue else { return }
 
+        // 归一化到 CMIO 协商格式（1920×1080 BGRA，IOSurface backed）。
+        // 不做这一步的后果（实测：线上日志 11900 条 `consumeSampleBuffer
+        // error: OSStatus -6`，客户端黑屏）：
+        //   1. ScreenCaptureKit 出帧尺寸按源 aspect 算，例如 2560×1440 桌面
+        //      → 1080×607，跟 stream 声明的 1920×1080 不一致，cmiod 在 IPC
+        //      边界直接拒收；
+        //   2. producer 的 CVPixelBuffer 没有 IOSurface，跨进程无法共享给
+        //      sysext 进程。
+        guard let normalized = CMIOFrameNormalizer.normalize(sample) else { return }
+
         let depthBefore = CMSimpleQueueGetCount(queue)
         let capacity = CMSimpleQueueGetCapacity(queue)
         guard capacity > 0, depthBefore < capacity else {
@@ -142,7 +153,7 @@ public final class CMIOSinkClient {
             return
         }
 
-        let unmanaged = Unmanaged.passRetained(sample)
+        let unmanaged = Unmanaged.passRetained(normalized)
         let status = CMSimpleQueueEnqueue(queue, element: unmanaged.toOpaque())
         if status != noErr {
             unmanaged.release()
@@ -584,5 +595,134 @@ public final class CMIOSinkClient {
             os_log("kCMIOHardwarePropertyAllowScreenCaptureDevices=1 set OK — virtual / sysext devices visible to HAL enumerate",
                    log: log, type: .default)
         }
+    }
+}
+
+// MARK: - CMIO 帧格式归一化
+
+/// CMIO 相机扩展固定协商的流格式。
+///
+/// host 推给 sink stream 的每一帧都必须是这个尺寸 / 像素格式，否则 cmiod
+/// 在 host↔extension 的 IPC 边界直接拒收（extension 侧只会看到
+/// `consumeSampleBuffer` 报 OSStatus 错误，客户端表现为黑屏）。
+/// extension 里 `CMIOExtensionStreamFormat` 的声明也必须引用这组常量，
+/// 两边漂移过一次 —— 见 SimCamCMIODevice.swift 的 `makeFormat(...)`。
+public enum CMIOFrameSpec {
+    /// 对外协商的相机分辨率。取 2560×1440：常见外接 QHD 屏（2560×1440）
+    /// 采集时正好 1:1，不再先缩小再放大；内建 Retina（3024×1964）也只需
+    /// 一次 0.73× 缩放。CMIOExtensionStreamFormat 在 extension 启动时就固定，
+    /// 运行期无法按源动态改变（真要"每个源自适应"得走动态 formats，属于另一次
+    /// 改造），所以这里取一个足够大的固定档位。
+    public static let width = 2560
+    public static let height = 1440
+    public static let pixelFormat = kCVPixelFormatType_32BGRA
+}
+
+/// 把任意尺寸 / 像素格式的 host 帧归一化成 CMIO 协商格式（16:9 居中 + 黑边）。
+///
+/// 两个硬约束（都踩过）：
+///   * **尺寸必须等于 `CMIOFrameSpec`**：ScreenCaptureKit 按源 aspect 出帧
+///     （2560×1440 桌面 → 1080×607），和 stream 声明的 1920×1080 不一致，
+///     cmiod 拒收。
+///   * **必须 IOSurface backed**：CMIO sink 是跨进程传帧，没有 IOSurface 的
+///     CVPixelBuffer 无法共享给 sysext 进程，同样被拒。producer 侧的
+///     `CVPixelBufferCreate` 之前只传了 CGImage 兼容键，没传
+///     `kCVPixelBufferIOSurfacePropertiesKey`。
+enum CMIOFrameNormalizer {
+
+    /// CIContext 建一次就够了（每帧新建代价很大）。
+    private static let ciContext = CIContext(options: [.cacheIntermediates: false])
+
+    private static var outputAttributes: [CFString: Any] {
+        [
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
+            kCVPixelBufferCGImageCompatibilityKey: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+        ]
+    }
+
+    /// 归一化：**总是**重建一个干净的 sample buffer。
+    ///
+    /// 曾经有个"尺寸/格式已匹配就原样返回"的快路径，结果 cmiod 仍然拒收
+    /// （extension 侧 `consumeSampleBuffer` 报 OSStatus -6，客户端黑屏）——
+    /// 因为 ScreenCaptureKit 的原始 sample buffer 自带它自己的
+    /// CMVideoFormatDescription 扩展和 frame attachments，跟 stream 声明的
+    /// 干净 format 不匹配。重建后 format description 由我们
+    /// `CMVideoFormatDescriptionCreateForImageBuffer` 生成，attachments 为空，
+    /// cmiod 才接受。
+    ///
+    /// 返回 nil 表示这一帧无法归一化，调用方应丢弃（不要退回原始 buffer）。
+    static func normalize(_ sample: CMSampleBuffer) -> CMSampleBuffer? {
+        guard let source = CMSampleBufferGetImageBuffer(sample) else { return nil }
+        return makeNormalizedSample(from: sample, sourceImage: source)
+    }
+
+    private static func makeNormalizedSample(from sample: CMSampleBuffer,
+                                             sourceImage: CVPixelBuffer) -> CMSampleBuffer? {
+        var destination: CVPixelBuffer?
+        let createStatus = CVPixelBufferCreate(kCFAllocatorDefault,
+                                               CMIOFrameSpec.width,
+                                               CMIOFrameSpec.height,
+                                               CMIOFrameSpec.pixelFormat,
+                                               outputAttributes as CFDictionary,
+                                               &destination)
+        guard createStatus == kCVReturnSuccess, let dest = destination else {
+            os_log("CMIOFrameNormalizer: CVPixelBufferCreate failed status=%{public}d",
+                   log: .default, type: .error, Int(createStatus))
+            return nil
+        }
+
+        // 等比缩放后居中，剩余区域补黑 —— 不做裁切，屏幕源不丢内容。
+        let ciSource = CIImage(cvPixelBuffer: sourceImage)
+        let extent = ciSource.extent
+        guard extent.width > 0, extent.height > 0 else { return nil }
+        let scale = min(CGFloat(CMIOFrameSpec.width) / extent.width,
+                        CGFloat(CMIOFrameSpec.height) / extent.height)
+        let scaled = ciSource.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let canvas = CGRect(x: 0, y: 0,
+                            width: CGFloat(CMIOFrameSpec.width),
+                            height: CGFloat(CMIOFrameSpec.height))
+        let dx = canvas.midX - scaled.extent.midX
+        let dy = canvas.midY - scaled.extent.midY
+        let centered = scaled.transformed(by: CGAffineTransform(translationX: dx, y: dy))
+        let background = CIImage(color: .black).cropped(to: canvas)
+
+        ciContext.render(centered.composited(over: background),
+                         to: dest,
+                         bounds: canvas,
+                         colorSpace: CGColorSpaceCreateDeviceRGB())
+
+        var formatDescription: CMFormatDescription?
+        let fmtStatus = CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: dest,
+            formatDescriptionOut: &formatDescription)
+        guard fmtStatus == noErr, let fmt = formatDescription else { return nil }
+
+        // 沿用原帧的 PTS（帧时序连续）；无效时退回 host 时钟。
+        var pts = CMSampleBufferGetPresentationTimeStamp(sample)
+        if !pts.isValid || !pts.isNumeric {
+            pts = CMClockGetTime(CMClockGetHostTimeClock())
+        }
+        var duration = CMSampleBufferGetDuration(sample)
+        if !duration.isValid || !duration.isNumeric || duration == .zero {
+            duration = CMTime(value: 1, timescale: 30)
+        }
+        var timing = CMSampleTimingInfo(duration: duration,
+                                        presentationTimeStamp: pts,
+                                        decodeTimeStamp: .invalid)
+
+        var normalized: CMSampleBuffer?
+        let sampleStatus = CMSampleBufferCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: dest,
+            dataReady: true,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: fmt,
+            sampleTiming: &timing,
+            sampleBufferOut: &normalized)
+        guard sampleStatus == noErr, let out = normalized else { return nil }
+        return out
     }
 }
