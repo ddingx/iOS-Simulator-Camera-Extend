@@ -254,6 +254,33 @@ xcrun simctl install booted /path/to/YourApp.app
 
 签名机制详见 [docs/signing-and-tcc.md](docs/signing-and-tcc.md)。
 
+### CI 构建（macOS arm64 发行包）
+
+`.github/workflows/build-macos-arm64.yml` 在 GitHub 托管的 Apple Silicon runner
+（`macos-15`）上构建 Release 配置的 arm64 包，**不需要本机装 Xcode**。
+
+| 触发 | 行为 |
+|---|---|
+| push 到 `main` | 构建 + 上传 artifact（保留 14 天）|
+| push tag `v*` | 构建 + 把产物挂到对应的 GitHub Release |
+| PR / 手动 `workflow_dispatch` | 仅构建验证 |
+
+产物：
+
+- `SimCam-<version>-arm64.zip` —— `SimCamApp.app`（内嵌 `dev.simcam.app.extension.systemextension`）
+- `SimCam-<version>-arm64.dmg` —— app + `/Applications` 快捷方式，拖拽安装
+- `SHA256SUMS.txt`
+
+构建时断言 `SimCamApp` 与 `SimCamExtension` 两个可执行文件都是 **纯 arm64**
+（`ARCHS=arm64 ONLY_ACTIVE_ARCH=NO`），并断言 `.systemextension` 确实被嵌进 bundle。
+
+> **CI 包是 ad-hoc 签名**（`CODE_SIGN_IDENTITY=-`）。仓库的签名模型是「每台机器
+> 本地自签名」，CI 现造的证书换台机器就不受信任，对下载者没有意义。真正安装时
+> `scripts/install-systemext.sh` 会重新签名并注入
+> `com.apple.developer.system-extension.install` —— 所以从 Release 下载后**仍然
+> 要走 `make install` 流程**，不能直接把 CI 包拷进 `/Applications/` 就指望 sysext
+> 激活。
+
 ---
 
 ## 完全不行的场景
