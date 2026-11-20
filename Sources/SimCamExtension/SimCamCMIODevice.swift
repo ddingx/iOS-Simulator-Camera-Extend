@@ -1,8 +1,11 @@
 import Foundation
+import CoreImage
 import CoreMedia
 import CoreMediaIO
 import CoreVideo
+import ImageIO
 import OSLog
+import UniformTypeIdentifiers
 import os
 
 /// 真正接入 CoreMediaIO 的 device / stream / provider。
@@ -236,6 +239,7 @@ final class SimCamCMIOStreamSource: NSObject, CMIOExtensionStreamSource {
             demoTimer?.cancel(); demoTimer = nil
             os_log("SimCam stream: switched from demo to host frames (sink)",
                    log: Self.streamLog, type: .default)
+            HostFrameDump.dumpIfEnabled(sample)
         }
 
         if let pb = CMSampleBufferGetImageBuffer(sample) {
@@ -413,6 +417,46 @@ final class SimCamCMIOSinkSource: NSObject, CMIOExtensionStreamSource {
             let output = CMIOExtensionScheduledOutput(sequenceNumber: seq,
                                                       hostTimeInNanoseconds: nanoSec)
             self.stream.notifyScheduledOutputChanged(output)
+        }
+    }
+}
+
+
+// MARK: - 排查工具：把扩展收到（并即将发给客户端）的首帧原样落盘
+
+/// 仅当 app group 容器里存在 `dump-frames.flag` 时才生效 —— 平时零开销、
+/// 不产生任何文件。用来回答「扩展到底把什么尺寸/朝向的帧交给了 cmiod」，
+/// 因为客户端侧的预览无法直接取证（TCC 拦住了外部探针）。
+enum HostFrameDump {
+    static func containerURL() -> URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "dev.simcam.app")
+            ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Group Containers/dev.simcam.app")
+    }
+
+    static func dumpIfEnabled(_ sample: CMSampleBuffer) {
+        guard let container = containerURL() else { return }
+        let flag = container.appendingPathComponent("dump-frames.flag")
+        guard FileManager.default.fileExists(atPath: flag.path) else { return }
+        guard let pb = CMSampleBufferGetImageBuffer(sample) else { return }
+
+        let image = CIImage(cvPixelBuffer: pb)
+        let context = CIContext()
+        guard let cg = context.createCGImage(image, from: image.extent) else {
+            os_log("HostFrameDump: createCGImage failed", log: SimCamCMIOStreamSource.streamLog, type: .error)
+            return
+        }
+        let out = container.appendingPathComponent("last-host-frame.png")
+        guard let dest = CGImageDestinationCreateWithURL(out as CFURL,
+                                                        UTType.png.identifier as CFString,
+                                                        1, nil) else { return }
+        CGImageDestinationAddImage(dest, cg, nil)
+        if CGImageDestinationFinalize(dest) {
+            os_log("HostFrameDump: wrote %{public}dx%{public}d to %{public}@",
+                   log: SimCamCMIOStreamSource.streamLog, type: .default,
+                   CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(pb), out.path as NSString)
+        } else {
+            os_log("HostFrameDump: finalize failed for %{public}@",
+                   log: SimCamCMIOStreamSource.streamLog, type: .error, out.path as NSString)
         }
     }
 }
