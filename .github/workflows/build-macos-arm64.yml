@@ -1,0 +1,181 @@
+name: Build macOS arm64
+
+# 构建 SimCam 的 macOS（Apple Silicon / arm64）发行包。
+#
+# 产物（dist/ 目录，全部上传为 artifact）：
+#   SimCam-<version>-arm64.zip   SimCamApp.app（含内嵌 System Extension）
+#   SimCam-<version>-arm64.dmg   拖拽安装用的磁盘镜像
+#   SHA256SUMS.txt
+#
+# 关于签名：CI 里用 ad-hoc 签名（CODE_SIGN_IDENTITY="-"）。这是有意的——
+#   * 仓库的签名模型是「每台机器本地自签名」（make bootstrap-cert），
+#     CI 里现造的证书换一台机器就不受信任，对下载者没有意义；
+#   * 真正的安装流程 scripts/install-systemext.sh 会重新签名并注入
+#     com.apple.developer.system-extension.install，CI 包的签名只影响
+#     「能不能被 codesign 校验」，不影响安装。
+#   见 docs/signing-and-tcc.md。
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 打 tag 时创建 Release 需要写权限
+permissions:
+  contents: write
+
+# 同一分支重复推送时取消上一次构建
+concurrency:
+  group: macos-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT: SimCam.xcodeproj
+  SCHEME: SimCam
+  CONFIGURATION: Release
+  APP_NAME: SimCamApp.app
+
+jobs:
+  build:
+    name: Build (arm64)
+    # macos-14 / macos-15 / macos-26 的 GitHub 托管 runner 都是 arm64；
+    # 工程是 objectVersion 77（Xcode 16 格式），macos-15 默认 Xcode 16.x 可读。
+    runs-on: macos-15
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i macos || true
+
+      - name: Build ${{ env.APP_NAME }} (${{ env.CONFIGURATION }}, arm64 only)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            build 2>&1 | tee xcodebuild.log
+
+      - name: Verify product is arm64 and contains the system extension
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/$CONFIGURATION/$APP_NAME"
+          test -d "$APP" || { echo "::error::missing $APP"; exit 1; }
+
+          EXT_DIR="$APP/Contents/Library/SystemExtensions"
+          EXT="$(find "$EXT_DIR" -maxdepth 1 -name '*.systemextension' 2>/dev/null | head -n1)"
+          test -n "$EXT" || { echo "::error::no embedded .systemextension under $EXT_DIR"; exit 1; }
+
+          status=0
+          while IFS= read -r bin; do
+            archs="$(lipo -archs "$bin")"
+            echo "  $bin -> $archs"
+            if [[ "$archs" != "arm64" ]]; then
+              echo "::error::expected arm64, got '$archs' for $bin"
+              status=1
+            fi
+          done < <(find "$APP/Contents/MacOS" "$EXT/Contents/MacOS" -type f -perm -u+x)
+
+          echo "== codesign =="
+          codesign -dvv "$APP" 2>&1 | sed 's/^/  /' || true
+          echo "== Info.plist =="
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist" || true
+
+          exit $status
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-$(date -u +%Y%m%d)-${GITHUB_SHA::7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Package (.zip + .dmg + SHA256SUMS)
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/$CONFIGURATION/$APP_NAME"
+          mkdir -p dist/stage
+
+          # zip：保留 bundle 元数据与符号链接（ditto，不用 zip）
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/SimCam-${VERSION}-arm64.zip"
+
+          # dmg：app + /Applications 快捷方式，拖拽即安装
+          ditto "$APP" "dist/stage/$APP_NAME"
+          ln -sfn /Applications "dist/stage/Applications"
+          hdiutil create -quiet -volname "SimCam ${VERSION}" \
+            -srcfolder dist/stage -ov -format UDZO \
+            "dist/SimCam-${VERSION}-arm64.dmg"
+          rm -rf dist/stage
+
+          ( cd dist && shasum -a 256 ./*.zip ./*.dmg > SHA256SUMS.txt )
+          ls -lh dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimCam-${{ steps.version.outputs.version }}-arm64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release:
+    name: Attach to GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: SimCam-*-arm64
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ls -lh dist
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "SimCam ${TAG}" \
+              --generate-notes \
+              --verify-tag
+          fi
