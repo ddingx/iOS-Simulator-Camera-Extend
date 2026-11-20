@@ -37,6 +37,10 @@ PROJECT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 #      build that just finished, not a stale sibling.
 #   4. Fall back to the in-tree build/ dir Xcode produces when DerivedData is
 #      redirected.
+#   5. Honour an explicit SIMCAM_APP_SRC override — needed when installing a
+#      build that lives outside DerivedData, e.g. a CI artifact:
+#          SIMCAM_APP_SRC=/path/to/SimCamApp.app ./scripts/install-systemext.sh
+#      (the script re-execs itself with `sudo -E`, so the variable survives).
 SRC=""
 DERIVED_ROOT="$HOME/Library/Developer/Xcode/DerivedData"
 if [[ -d "$DERIVED_ROOT" ]]; then
@@ -64,6 +68,12 @@ if [[ -z "$SRC" || ! -d "$SRC" ]]; then
         SRC="$FALLBACK"
     fi
 fi
+
+# Explicit override wins (see strategy 5 above). Accepts a .app bundle path.
+if [[ -n "${SIMCAM_APP_SRC:-}" ]]; then
+    SRC="$SIMCAM_APP_SRC"
+fi
+
 DST="/Applications/SimCamApp.app"
 
 if [[ -z "$SRC" || ! -d "$SRC" ]]; then

@@ -281,6 +281,16 @@ xcrun simctl install booted /path/to/YourApp.app
 > 要走 `make install` 流程**，不能直接把 CI 包拷进 `/Applications/` 就指望 sysext
 > 激活。
 
+安装 CI 产物（bundle 不在 DerivedData 里，也没有本地 Debug build 可用）：
+
+```bash
+# 先解压出 SimCamApp.app（zip 或挂载 dmg 后拷出来），然后：
+SIMCAM_APP_SRC="$PWD/build/ci/SimCamApp.app" ./scripts/install-systemext.sh
+```
+
+`SIMCAM_APP_SRC` 会覆盖脚本里「在 DerivedData 里找 Debug 构建」的默认搜索逻辑；
+脚本自己会用 `sudo -E` 提权，所以这个变量能传到 root 那一步。
+
 ---
 
 ## 完全不行的场景
