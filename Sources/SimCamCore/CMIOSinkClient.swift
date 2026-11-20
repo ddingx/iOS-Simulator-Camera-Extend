@@ -636,20 +636,20 @@ enum CMIOFrameNormalizer {
         ]
     }
 
-    /// 归一化。已经完全符合（尺寸 + 像素格式 + IOSurface）时原样返回，
-    /// 避免无谓的 GPU 拷贝。返回 nil 表示这一帧无法归一化，调用方应丢弃。
+    /// 归一化：**总是**重建一个干净的 sample buffer。
+    ///
+    /// 曾经有个"尺寸/格式已匹配就原样返回"的快路径，结果 cmiod 仍然拒收
+    /// （extension 侧 `consumeSampleBuffer` 报 OSStatus -6，客户端黑屏）——
+    /// 因为 ScreenCaptureKit 的原始 sample buffer 自带它自己的
+    /// CMVideoFormatDescription 扩展和 frame attachments，跟 stream 声明的
+    /// 干净 format 不匹配。重建后 format description 由我们
+    /// `CMVideoFormatDescriptionCreateForImageBuffer` 生成，attachments 为空，
+    /// cmiod 才接受。
+    ///
+    /// 返回 nil 表示这一帧无法归一化，调用方应丢弃（不要退回原始 buffer）。
     static func normalize(_ sample: CMSampleBuffer) -> CMSampleBuffer? {
         guard let source = CMSampleBufferGetImageBuffer(sample) else { return nil }
-
-        if isAlreadyCompatible(source) { return sample }
         return makeNormalizedSample(from: sample, sourceImage: source)
-    }
-
-    private static func isAlreadyCompatible(_ buffer: CVPixelBuffer) -> Bool {
-        CVPixelBufferGetWidth(buffer) == CMIOFrameSpec.width
-            && CVPixelBufferGetHeight(buffer) == CMIOFrameSpec.height
-            && CVPixelBufferGetPixelFormatType(buffer) == CMIOFrameSpec.pixelFormat
-            && CVPixelBufferGetIOSurface(buffer) != nil
     }
 
     private static func makeNormalizedSample(from sample: CMSampleBuffer,
