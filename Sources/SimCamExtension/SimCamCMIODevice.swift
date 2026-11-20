@@ -158,7 +158,8 @@ final class SimCamCMIOStreamSource: NSObject, CMIOExtensionStreamSource {
     init(device: CMIOExtensionDevice) {
         self.device = device
         let streamID = UUID(uuidString: "5C8F9A6E-2D11-4A5D-8E6E-3F1C4B1E0002")!
-        let format = Self.makeFormat(width: 1920, height: 1080)
+        let format = Self.makeFormat(width: Int32(CMIOFrameSpec.width),
+                                     height: Int32(CMIOFrameSpec.height))
         self.formatDescription = format
         let cfg = CMIOExtensionStreamFormat(formatDescription: format,
                                             maxFrameDuration: CMTime(value: 1, timescale: 30),
@@ -240,6 +241,15 @@ final class SimCamCMIOStreamSource: NSObject, CMIOExtensionStreamSource {
         if let pb = CMSampleBufferGetImageBuffer(sample) {
             let w = Int32(CVPixelBufferGetWidth(pb))
             let h = Int32(CVPixelBufferGetHeight(pb))
+            if firstReal {
+                // 首帧日志：排查 host→sink 传输问题时一眼能看出尺寸/像素格式
+                // 是否和 CMIOFrameSpec 一致、有没有 IOSurface。
+                os_log("SimCam first host frame: %{public}dx%{public}d fmt=%{public}u iosurface=%{public}@",
+                       log: Self.streamLog, type: .default,
+                       Int(w), Int(h),
+                       CVPixelBufferGetPixelFormatType(pb),
+                       (CVPixelBufferGetIOSurface(pb) != nil ? "yes" : "no") as NSString)
+            }
             if w != width || h != height || formatDescription == nil {
                 width = w; height = h
                 formatDescription = Self.makeFormat(width: w, height: h)
@@ -325,7 +335,8 @@ final class SimCamCMIOSinkSource: NSObject, CMIOExtensionStreamSource {
         self.device = device
         self.sourceStream = sourceStream
         let streamID = UUID(uuidString: "5C8F9A6E-2D11-4A5D-8E6E-3F1C4B1E0003")!
-        let format = SimCamCMIOStreamSource.makeFormat(width: 1920, height: 1080)
+        let format = SimCamCMIOStreamSource.makeFormat(width: Int32(CMIOFrameSpec.width),
+                                                     height: Int32(CMIOFrameSpec.height))
         let cfg = CMIOExtensionStreamFormat(formatDescription: format,
                                             maxFrameDuration: CMTime(value: 1, timescale: 30),
                                             minFrameDuration: CMTime(value: 1, timescale: 60),
