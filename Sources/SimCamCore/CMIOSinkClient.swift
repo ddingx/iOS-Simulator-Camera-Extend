@@ -608,8 +608,13 @@ public final class CMIOSinkClient {
 /// extension 里 `CMIOExtensionStreamFormat` 的声明也必须引用这组常量，
 /// 两边漂移过一次 —— 见 SimCamCMIODevice.swift 的 `makeFormat(...)`。
 public enum CMIOFrameSpec {
-    public static let width = 1920
-    public static let height = 1080
+    /// 对外协商的相机分辨率。取 2560×1440：常见外接 QHD 屏（2560×1440）
+    /// 采集时正好 1:1，不再先缩小再放大；内建 Retina（3024×1964）也只需
+    /// 一次 0.73× 缩放。CMIOExtensionStreamFormat 在 extension 启动时就固定，
+    /// 运行期无法按源动态改变（真要"每个源自适应"得走动态 formats，属于另一次
+    /// 改造），所以这里取一个足够大的固定档位。
+    public static let width = 2560
+    public static let height = 1440
     public static let pixelFormat = kCVPixelFormatType_32BGRA
 }
 

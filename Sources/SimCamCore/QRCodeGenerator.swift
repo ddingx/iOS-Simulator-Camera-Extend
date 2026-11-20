@@ -28,7 +28,16 @@ public enum QRCodeGenerator {
             ci = color.outputImage ?? ci
         }
 
+        // QR 规范要求四周有 quiet zone（≥4 模块）。CIQRCodeGenerator 的输出
+        // 不带留白，贴边渲染时扫码器会拒识。这里把码缩到 84% 居中放到白色
+        // 画布上，四周留出 ~8% 的静区。
+        let margin = CGFloat(size) * 0.08
+        let canvas = CGRect(x: 0, y: 0, width: CGFloat(size), height: CGFloat(size))
+        let inline = ci.transformed(by: CGAffineTransform(scaleX: 0.84, y: 0.84))
+            .transformed(by: CGAffineTransform(translationX: margin, y: margin))
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: canvas)
+        let composed = inline.composited(over: white)
         let context = CIContext()
-        return context.createCGImage(ci, from: ci.extent)
+        return context.createCGImage(composed, from: canvas)
     }
 }

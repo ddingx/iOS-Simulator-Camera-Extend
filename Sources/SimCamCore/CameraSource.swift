@@ -44,7 +44,7 @@ public enum CameraSource: Codable, Equatable, CustomStringConvertible {
 
 /// 输入帧分辨率与方向描述。
 ///
-/// 默认 1920×1080（横屏 16:9）：这是 CMIO 相机扩展对外协商的固定格式
+/// 默认 2560×1440（横屏 16:9）：这是 CMIO 相机扩展对外协商的固定格式
 /// （见 `CMIOFrameSpec`）。之前默认 1080×1920（竖屏）会让屏幕采集先按
 /// 「宽度上限 1080」缩到 1080×607，再由 CMIO 归一化放大回 1920×1080 ——
 /// 双重缩放，画面糊且丢细节。改成 1920×1080 后，2560×1440 桌面一次
@@ -55,7 +55,7 @@ public struct FrameFormat: Codable, Equatable {
     public var fps: Int
     public var isFrontFacing: Bool
 
-    public init(width: Int = 1920, height: Int = 1080, fps: Int = 30, isFrontFacing: Bool = false) {
+    public init(width: Int = 2560, height: Int = 1440, fps: Int = 30, isFrontFacing: Bool = false) {
         self.width = width
         self.height = height
         self.fps = fps
